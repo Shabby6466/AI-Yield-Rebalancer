@@ -14,6 +14,8 @@ from src.data.defillama_client import DefiLlamaClient
 from src.ml.mean_reversion import MeanReversionFilter
 from src.risk.liquidity import LiquidityFilter
 from src.optimizer.gas import GasOptimizer
+from src.optimizer.trade_sizer import TradeSizer
+from src.backtest.prediction_tracker import PredictionTracker
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +33,8 @@ async def startup_event():
     clients['mean_reversion'] = MeanReversionFilter()
     clients['liquidity'] = LiquidityFilter()
     clients['gas'] = GasOptimizer()
+    clients['sizer'] = TradeSizer()
+    clients['tracker'] = PredictionTracker()
 
 # Data Models
 class RebalanceRequest(BaseModel):
@@ -139,6 +143,12 @@ async def predict_yield_opportunity(request: RebalanceRequest):
         )
 
     if not is_profitable:
+        # Record prediction
+        clients['tracker'].record_prediction(
+            "HOLD", current_pool_id, current_apy*100,
+            best_pool['pool'], new_apy*100, 0.5,
+            f"High migration costs (${total_cost:.2f})", capital_usd
+        )
         return {
             "action": "HOLD",
             "target_allocations": request.current_allocations,
@@ -149,6 +159,12 @@ async def predict_yield_opportunity(request: RebalanceRequest):
             "metrics": cost_breakdown
         }
 
+    # Record prediction
+    clients['tracker'].record_prediction(
+        "REBALANCE", current_pool_id, current_apy*100,
+        best_pool['pool'], new_apy*100, 0.95,
+        f"Valid opportunity: +{new_apy-current_apy:.2%} APY gain", capital_usd
+    )
     # If all pass -> REBALANCE
     return {
         "action": "REBALANCE",
