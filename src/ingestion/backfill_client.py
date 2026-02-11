@@ -334,7 +334,7 @@ class DefiLlamaBackfiller:
             """)
             protocol_counts = cur.fetchall()
             
-            print("\n📊 Database Summary:")
+            print("\n Database Summary:")
             print(f"  Total Records: {total_records:,}")
             print(f"  Date Range: {min_date} to {max_date}")
             print(f"  Duration: {(max_date - min_date).days} days")

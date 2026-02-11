@@ -90,7 +90,7 @@ class AaveV3Collector:
         Returns:
             List of dicts with: symbol, address, apy_percent, tvl_usd, utilization_rate
         """
-        print("\n📊 Fetching Aave V3 data...")
+        print("\n Fetching Aave V3 data...")
         
         # Manually specify the assets we want to track
         # Format: (symbol, address, decimals)
@@ -223,7 +223,7 @@ class CurveCollector:
         Returns:
             List of dicts with: symbol, address, virtual_price, block_number
         """
-        print("\n📊 Fetching Curve data...")
+        print("\n Fetching Curve data...")
         
         results = []
         current_block = self.w3.eth.block_number

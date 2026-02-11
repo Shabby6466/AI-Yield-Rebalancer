@@ -171,7 +171,7 @@ class LiveCollector:
     
     def collect_and_store(self):
         """Main collection workflow."""
-        print("\n📊 Collecting latest yields from DefiLlama...")
+        print("\n Collecting latest yields from DefiLlama...")
         
         current_time = datetime.utcnow()
         records = []

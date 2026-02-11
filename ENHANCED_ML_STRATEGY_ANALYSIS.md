@@ -310,10 +310,10 @@ The Enhanced Optimized Unified ML Strategy represents a **major advancement**:
 - ✅ **$98 additional profit** on $10K in 90 days
 
 ### Qualitative Advantages
-- 🧠 **Predictive**: LSTM forecasts future yields
-- 🛡️ **Risk-aware**: XGBoost filters dangerous assets
+-  **Predictive**: LSTM forecasts future yields
+-  **Risk-aware**: XGBoost filters dangerous assets
 - 💰 **Cost-optimized**: Smart transaction costs
-- 📊 **Stable**: Position persistence reduces churn
+-  **Stable**: Position persistence reduces churn
 - 🎯 **Scalable**: Better performance at higher capital levels
 
 ### Production Readiness

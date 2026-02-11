@@ -41,7 +41,7 @@ Data Sources → Feature Engineering → ML Models → Rebalancing
 | Training Pipeline | 266 | ✅ Done | Production |
 | **Total Code** | **5,179** | **✅ Done** | **Tested** |
 
-## 📊 Current Data
+##  Current Data
 
 - **Protocols**: 3 (Aave V3, Uniswap V3, Curve)
 - **Markets**: 60 total
@@ -54,7 +54,7 @@ Data Sources → Feature Engineering → ML Models → Rebalancing
 - Curve stETH: 13.243%
 - Uniswap XOR/WETH: 964% ⚠️
 
-## 🚀 Next Actions
+## Next Actions
 
 ### 1. Start Data Collection (NOW)
 ```bash
@@ -82,7 +82,7 @@ tensorboard --logdir models/logs/
 - Same 32 features
 - Target: >90% precision
 
-## 📈 Week-by-Week Progress
+##  Week-by-Week Progress
 
 | Week | Task | Status |
 |------|------|--------|
@@ -171,4 +171,4 @@ tail -f data_collection.log
 **Phase 1 completion**: ~2 weeks  
 **Full POC**: 4-6 weeks
 
-🚀 **Action**: Start the scheduler now!
+**Action**: Start the scheduler now!

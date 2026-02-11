@@ -93,7 +93,7 @@ async def predict_yield_opportunity(request: RebalanceRequest):
         return {
             "action": "HOLD",
             "target_allocations": request.current_allocations,
-            "confidence": 0.0,
+            "confidence": 0.25, # Risk Detected
             "reason": f"Mean Reversion Risk: New APY {new_apy:.2%} is a statistical anomaly.",
             "estimated_gas": 0,
             "net_apy_gain": 0,
@@ -105,7 +105,7 @@ async def predict_yield_opportunity(request: RebalanceRequest):
          return {
             "action": "HOLD",
             "target_allocations": request.current_allocations,
-            "confidence": 0.0,
+            "confidence": 0.25, # Risk Detected
             "reason": f"Liquidity Risk: Moving ${capital_usd} would cause high slippage.",
             "estimated_gas": 0,
             "net_apy_gain": 0,

@@ -38,7 +38,7 @@ scripts/
 ├── init_database.sql     # Database schema initialization
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Initialize Database
 
@@ -73,7 +73,7 @@ python src/ingestion/live_collector.py
 python src/ingestion/scheduler.py
 ```
 
-## 📊 Data Coverage
+##  Data Coverage
 
 ### Aave V3 (5 assets)
 - USDC: Stablecoin lending
@@ -109,7 +109,7 @@ DB_PASSWORD=postgres
 ALCHEMY_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
 ```
 
-## 📈 Data Quality
+##  Data Quality
 
 ### Backfill (DefiLlama Historical)
 - **Source:** DefiLlama yields.llama.fi API

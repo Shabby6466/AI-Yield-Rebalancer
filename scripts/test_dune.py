@@ -37,7 +37,7 @@ async def test_dune_client():
     client = DuneClient(api_key)
     
     # Test 1: Try to execute a SQL query directly (may require paid plan)
-    logger.info("📊 Testing Dune API with Aave V3 query...")
+    logger.info(" Testing Dune API with Aave V3 query...")
     try:
         aave_query = AaveV3Queries.get_market_rates()
         logger.info("   Query SQL length: {} chars".format(len(aave_query)))
@@ -81,7 +81,7 @@ async def test_dune_client():
         logger.error(f"❌ Query execution error: {e}")
     
     # Test 2: Try Curve query
-    logger.info("\n📊 Testing Curve Finance query...")
+    logger.info("\n Testing Curve Finance query...")
     try:
         curve_query = CurveFinanceQueries.get_pool_apys()
         logger.info("   Query SQL length: {} chars".format(len(curve_query)))

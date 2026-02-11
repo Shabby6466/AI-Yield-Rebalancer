@@ -103,7 +103,7 @@ async def collect_and_store_current_data():
     
     # Collect Aave V3 data
     try:
-        logger.info("📊 Collecting Aave V3 data...")
+        logger.info(" Collecting Aave V3 data...")
         aave_data = await aggregator.collect_aave_data()
         
         if aave_data and "markets" in aave_data:
@@ -125,7 +125,7 @@ async def collect_and_store_current_data():
     
     # Collect Uniswap V3 data
     try:
-        logger.info("\n📊 Collecting Uniswap V3 data...")
+        logger.info("\n Collecting Uniswap V3 data...")
         uni_data = await aggregator.collect_uniswap_data()
         
         if uni_data and "pools" in uni_data:
@@ -174,7 +174,7 @@ async def collect_and_store_current_data():
     
     # Collect Curve data
     try:
-        logger.info("\n📊 Collecting Curve Finance data...")
+        logger.info("\n Collecting Curve Finance data...")
         curve_data = await aggregator.collect_curve_data()
         
         if curve_data and "pools" in curve_data:

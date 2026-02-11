@@ -37,8 +37,11 @@ class LiquidityFilter:
             
         impact = trade_size_usd / tvl
         
-        if impact > self.max_slippage * 10: # Rough approximation: Price impact ~ Trade/TVL
-            logger.warning(f"Liquidity Risk! Trade size ${trade_size_usd} is {impact:.2%} of Pool TVL (${tvl}). Max allowed impact: {self.max_slippage:.2%}")
+        # Rough approximation: Price impact ~ Trade/TVL
+        # Relaxed for concentrated liquidity (efficient capital usage)
+        # Allows up to 5% of TVL as max impact threshold for MVP
+        if impact > 0.05: 
+            logger.warning(f"Liquidity Risk! Trade size ${trade_size_usd} is {impact:.2%} of Pool TVL (${tvl}). Limit: 5%")
             return False
             
         return True

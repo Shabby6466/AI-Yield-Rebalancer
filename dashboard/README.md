@@ -10,7 +10,7 @@ Interactive web dashboard for monitoring and analyzing the AI-Driven DeFi Yield 
 - Strategy comparison charts
 - Quick stats and achievements
 
-### 📊 Performance Analytics
+###  Performance Analytics
 - Detailed strategy comparisons
 - Risk-adjusted metrics (Sharpe ratio, Max drawdown)
 - Efficiency metrics (ROI, Cost ratio)
@@ -22,7 +22,7 @@ Interactive web dashboard for monitoring and analyzing the AI-Driven DeFi Yield 
 - Portfolio growth over time
 - Profit/loss tracking
 
-### 📈 Market Data
+###  Market Data
 - Latest market updates (APY, TVL)
 - Protocol distribution analysis
 - Top performing assets
@@ -203,6 +203,6 @@ For issues or questions:
 ## Next Steps
 
 1. ✅ Start dashboard: `streamlit run dashboard/app.py`
-2. 📊 Monitor real-time data collection
+2.  Monitor real-time data collection
 3. 🔍 Analyze backtest results
 4. 🎯 Review before testnet deployment

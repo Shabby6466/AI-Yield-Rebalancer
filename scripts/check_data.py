@@ -18,7 +18,7 @@ cur = conn.cursor()
 # Count total records
 cur.execute('SELECT COUNT(*) FROM protocol_yields')
 total = cur.fetchone()[0]
-print(f"\n📊 Total records collected: {total}")
+print(f"\n Total records collected: {total}")
 
 # Get latest collection time
 cur.execute('SELECT MAX(recorded_at) FROM protocol_yields')
@@ -32,7 +32,7 @@ cur.execute("""
     GROUP BY protocol_id 
     ORDER BY protocol_id
 """)
-print("\n📈 Records by protocol:")
+print("\n Records by protocol:")
 for protocol_id, count in cur.fetchall():
     print(f"   Protocol {protocol_id}: {count} records")
 

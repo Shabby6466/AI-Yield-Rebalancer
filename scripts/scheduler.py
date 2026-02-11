@@ -51,7 +51,7 @@ def main():
     logger.info(f"⏰ Started: {datetime.now()}\n")
     
     # Run immediately on start
-    logger.info("🚀 Running initial collection...")
+    logger.info("Running initial collection...")
     run_collection()
     
     # Schedule collection at configurable interval

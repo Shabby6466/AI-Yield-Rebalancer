@@ -2138,7 +2138,7 @@ if stablecoin_price < 0.98:
 - ✅ Collect 18 months of historical data via Dune Analytics
 - ✅ Implement data cleaning and normalization
 - ✅ Create feature engineering pipeline (32 features for LSTM)
-- 📊 **Success Metric:** Ingest 1M+ data points covering 10+ protocols
+-  **Success Metric:** Ingest 1M+ data points covering 10+ protocols
 
 **Month 2: ML Model Development**
 - ✅ Implement LSTM yield forecasting model (PyTorch)
@@ -2147,7 +2147,7 @@ if stablecoin_price < 0.98:
 - ✅ Create walk-forward validation framework
 - ✅ Tune hyperparameters (Optuna or Ray Tune)
 - ✅ Generate SHAP explanations for model interpretability
-- 📊 **Success Metric:** LSTM MAPE < 10%, XGBoost accuracy > 80%
+-  **Success Metric:** LSTM MAPE < 10%, XGBoost accuracy > 80%
 
 **Month 3: Backtesting & Simulation**
 - ✅ Build custom backtesting engine (Python)
@@ -2156,7 +2156,7 @@ if stablecoin_price < 0.98:
 - ✅ Backtest LSTM-based strategy vs baselines
 - ✅ Analyze results (Sharpe ratio, max drawdown, gas efficiency)
 - ✅ Document findings and create presentation
-- 📊 **Success Metric:** ML strategy outperforms baseline by >2% APY net of costs
+-  **Success Metric:** ML strategy outperforms baseline by >2% APY net of costs
 
 **Deliverables:**
 1. **Data Pipeline:** Automated ingestion from 3+ sources
@@ -2185,7 +2185,7 @@ if stablecoin_price < 0.98:
 - ✅ Build liquidity depth analyzer (Uniswap V3, Curve)
 - ✅ Implement Transformer model for systemic risk detection
 - ✅ Create risk dashboard UI (Grafana + custom React frontend)
-- 📊 **Success Metric:** Risk scores correlate with historical exploits (AUC > 0.85)
+-  **Success Metric:** Risk scores correlate with historical exploits (AUC > 0.85)
 
 **Month 5: Kill Switch Implementation**
 - ✅ Develop on-chain kill switch logic (Solidity)
@@ -2194,7 +2194,7 @@ if stablecoin_price < 0.98:
 - ✅ Integrate external threat intel (Immunefi, Rekt News RSS)
 - ✅ Create emergency withdrawal procedures
 - ✅ Test kill switches in Foundry (fuzzing, edge cases)
-- 📊 **Success Metric:** Kill switches trigger within 5 minutes of simulated attacks
+-  **Success Metric:** Kill switches trigger within 5 minutes of simulated attacks
 
 **Month 6: Adversarial Testing**
 - ✅ Create adversarial test scenarios (flash crashes, exploits, de-pegs)
@@ -2203,7 +2203,7 @@ if stablecoin_price < 0.98:
 - ✅ Stress test with 100+ simulated failures
 - ✅ Refine risk thresholds based on false positive/negative analysis
 - ✅ Document incident response procedures
-- 📊 **Success Metric:** <5% capital loss in worst-case scenarios
+-  **Success Metric:** <5% capital loss in worst-case scenarios
 
 **Deliverables:**
 1. **Risk Engine:** Production-ready risk scoring system
@@ -2233,7 +2233,7 @@ if stablecoin_price < 0.98:
 - ✅ Add emergency withdrawal functions
 - ✅ Implement multi-sig governance (Gnosis Safe)
 - ✅ Write comprehensive Foundry tests (>90% coverage)
-- 📊 **Success Metric:** All tests pass, gas costs < 500K per rebalance
+-  **Success Metric:** All tests pass, gas costs < 500K per rebalance
 
 **Month 8: RL Agent Training**
 - ✅ Implement PPO rebalancing agent (Stable-Baselines3)
@@ -2242,7 +2242,7 @@ if stablecoin_price < 0.98:
 - ✅ Benchmark against SAC algorithm
 - ✅ Validate on held-out data (2025-07-01 to 2025-12-31)
 - ✅ Fine-tune reward function based on backtest results
-- 📊 **Success Metric:** RL agent achieves Sharpe ratio > 2.5 in simulation
+-  **Success Metric:** RL agent achieves Sharpe ratio > 2.5 in simulation
 
 **Month 9: Integration & Testnet Deployment**
 - ✅ Deploy smart contracts to Goerli/Sepolia testnet
@@ -2252,7 +2252,7 @@ if stablecoin_price < 0.98:
 - ✅ Deploy ML inference pipeline
 - ✅ Configure monitoring (Grafana + PagerDuty)
 - ✅ Create user-facing dashboard (portfolio view, risk scores)
-- 📊 **Success Metric:** System runs autonomously for 48 hours without manual intervention
+-  **Success Metric:** System runs autonomously for 48 hours without manual intervention
 
 **Month 10: Live Testing & Iteration**
 - ✅ Deposit $10K in testnet ETH (from faucets)
@@ -2261,7 +2261,7 @@ if stablecoin_price < 0.98:
 - ✅ Identify and fix bugs/edge cases
 - ✅ Optimize gas usage (batch operations, multicall)
 - ✅ Conduct external security audit (Trail of Bits, OpenZeppelin, or Certik)
-- 📊 **Success Metric:** >95% uptime, net positive APY after gas costs, zero critical bugs
+-  **Success Metric:** >95% uptime, net positive APY after gas costs, zero critical bugs
 
 **Deliverables:**
 1. **Smart Contracts:** Audited, deployed to testnet
@@ -2282,22 +2282,22 @@ if stablecoin_price < 0.98:
 ### Post-MVP: Mainnet Launch & Scaling (Ongoing)
 
 **Month 11+:**
-- 🚀 Deploy to Ethereum mainnet with $100K deposit cap
-- 🚀 Gradual cap increases ($500K → $2M → $10M) based on performance
-- 🚀 Add support for additional protocols (Compound, MakerDAO, Yearn)
-- 🚀 Implement L2 deployments (Arbitrum, Optimism, Base)
-- 🚀 Launch governance token for parameter voting
-- 🚀 Build user acquisition funnel (docs, tutorials, partnerships)
-- 🚀 Continuous model retraining (monthly updates)
-- 🚀 Expand to multi-asset strategies (ETH, BTC, altcoins)
+- Deploy to Ethereum mainnet with $100K deposit cap
+- Gradual cap increases ($500K → $2M → $10M) based on performance
+- Add support for additional protocols (Compound, MakerDAO, Yearn)
+- Implement L2 deployments (Arbitrum, Optimism, Base)
+- Launch governance token for parameter voting
+- Build user acquisition funnel (docs, tutorials, partnerships)
+- Continuous model retraining (monthly updates)
+- Expand to multi-asset strategies (ETH, BTC, altcoins)
 
 **Success Metrics (First 6 Months on Mainnet):**
-- 📊 TVL: $5M+
-- 📊 Net APY: >5% after all costs
-- 📊 Sharpe Ratio: >2.0
-- 📊 Max Drawdown: <10%
-- 📊 Uptime: >99.5%
-- 📊 Zero loss of user funds due to system failures
+-  TVL: $5M+
+-  Net APY: >5% after all costs
+-  Sharpe Ratio: >2.0
+-  Max Drawdown: <10%
+-  Uptime: >99.5%
+-  Zero loss of user funds due to system failures
 
 ---
 

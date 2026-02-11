@@ -1,7 +1,7 @@
 #!/bin/bash
 # Start the DeFi Yield Rebalancing Dashboard
 
-echo "🚀 Starting DeFi Yield Rebalancing Dashboard..."
+echo "Starting DeFi Yield Rebalancing Dashboard..."
 echo ""
 
 cd "$(dirname "$0")/.."

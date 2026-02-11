@@ -41,7 +41,7 @@ def verify_brain():
         response = requests.post("http://localhost:8000/inference/predict", json=payload)
         result = response.json()
         
-        print("\n🧠 BRAIN DECISION:")
+        print("\n BRAIN DECISION:")
         print(f"Action: {result['action']}")
         print(f"Confidence: {result['confidence']}")
         print(f"Reason: {result['reason']}")

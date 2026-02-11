@@ -8,7 +8,7 @@ from src.data.defillama_client import DefiLlamaClient
 
 st.set_page_config(page_title="AI Yield Brain - Live Status", layout="wide")
 
-st.title("🧠 AI Yield Rebalancer: Live Brain Status")
+st.title(" AI Yield Rebalancer: Live Brain Status")
 
 # --- Sidebar ---
 st.sidebar.header("System Status")
@@ -19,7 +19,7 @@ except:
     st.sidebar.error("Brain Offline (Is server.py running?)")
 
 # --- Test Portfolio Section ---
-st.markdown("### 💼 Active Test Portfolio")
+st.markdown("###  Active Test Portfolio")
 
 @st.cache_data(ttl=3600)
 def fetch_valid_pools():
@@ -110,7 +110,7 @@ if context_pools:
     t_pool = next((p for p in context_pools if p['pool'] == target_asset_id), None)
     
     if c_pool and t_pool:
-        st.info(f"📊 **Context:** You hold **${capital_input:,.0f}** in {current_asset_name} earning **{c_pool['apy']:.2f}%**. The opportunity is {target_asset_name} at **{t_pool['apy']:.2f}%**.")
+        st.info(f" **Context:** You hold **${capital_input:,.0f}** in {current_asset_name} earning **{c_pool['apy']:.2f}%**. The opportunity is {target_asset_name} at **{t_pool['apy']:.2f}%**.")
 
 
 # Helper: Fetch History
@@ -130,13 +130,35 @@ def get_apy_history(pool_id):
     except Exception as e:
         return []
 
+# --- Sidebar Scanner ---
+with st.sidebar:
+    st.markdown("###  Market Scanner")
+    st.markdown("Top Stablecoin Yields (ETH/Base)")
+    
+    # Async Fetch for Sidebar
+    async def get_top_opps():
+        client = DefiLlamaClient()
+        return await client.fetch_top_pools(limit=5)
+    
+    try:
+        top_pools = run_async(get_top_opps())
+        if top_pools:
+            for p in top_pools:
+                st.markdown(f"**{p['symbol']}** ({p['project'].title()})")
+                st.caption(f"**{p['apy']:.2f}%** | TVL: ${p['tvlUsd']/1e6:.1f}M")
+                st.divider()
+        else:
+            st.info("Scanning...")
+    except Exception:
+        st.caption("Scanner offline")
+
 # --- Tabs Layout ---
-tab1, tab2, tab3 = st.tabs(["⚡ Live Decision", "📈 Deep Dive Analytics", "🍰 Portfolio Composition"])
+tab1, tab2, tab3 = st.tabs([" Live Decision", " Deep Dive Analytics", " Portfolio Composition"])
 
 with tab1:
-    st.markdown("### 🤖 AI Brain Decision")
+    st.markdown("### AI Brain Decision")
     
-    if st.button("⚡ Ask Brain for Decision", type="primary"):
+    if st.button(" Ask Brain for Decision", type="primary"):
         with st.spinner("Analyzing market data, risk models, and gas costs..."):
             # Payload must use IDs as keys for allocations
             allocations_payload = {
@@ -176,7 +198,7 @@ with tab1:
                         mc1, mc2, mc3 = st.columns(3)
                         mc1.metric("⛽ Gas Cost", f"${m.get('gas_exit',0) + m.get('gas_bridge',0) + m.get('gas_enter',0):.2f}")
                         mc2.metric("🔄 Swap Fees", f"${m.get('swap_fees',0):.2f}")
-                        mc3.metric("📉 Total Loss", f"${m.get('total_conversion_loss',0):.2f}", help="Gas + Swap Fees")
+                        mc3.metric(" Total Loss", f"${m.get('total_conversion_loss',0):.2f}", help="Gas + Swap Fees")
                         
                         roi = m.get('roi_days', 999)
                         if roi < 365:
@@ -192,9 +214,7 @@ with tab1:
                     
             except Exception as e:
                 st.error(f"Error communicating with Brain: {e}")
-
-with tab2:
-    st.markdown("### 📈 Historical Yield Analysis (30 Days)")
+    st.markdown("###  Historical Yield Analysis (30 Days)")
     
     if current_asset_id and target_asset_id:
         with st.spinner("Fetching historical data..."):
@@ -219,20 +239,78 @@ with tab2:
                 
                 st.line_chart(combined)
                 
+                # --- AI Graph Insights ---
+                def generate_insights(series, name):
+                    insights = []
+                    if series.empty: return ["No data available."]
+                    
+                    # 1. Data Quality Check
+                    missing_ratio = series.isna().sum() / len(series)
+                    if missing_ratio > 0.2:
+                        insights.append(f"⚠️ **Data Gaps**: {name} is missing {missing_ratio*100:.0f}% of data points (Illiquid/ unstable feed).")
+                    
+                    # 2. Volatility Check
+                    median = series.median()
+                    maximum = series.max()
+                    if median > 0 and (maximum - median) > (0.5 * median):
+                        insights.append(f" **Spike Alert**: {name} had a massive spike to {maximum:.2f}% (median: {median:.2f}%). Likely artificial.")
+                        
+                    # 3. Crash Detection
+                    current = series.iloc[-1] if not series.empty else 0
+                    if maximum > 0 and current < (0.5 * maximum):
+                        insights.append(f"🔻 **Crash Warning**: {name} is down {((maximum-current)/maximum)*100:.0f}% from its 30-day peak.")
+                        
+                    # 4. Trend
+                    recent_avg = series.tail(3).mean()
+                    long_avg = series.mean()
+                    if recent_avg > (long_avg * 1.1):
+                        insights.append(f" **Uptrend**: {name} is trending up (+{(recent_avg/long_avg - 1)*100:.1f}% vs 30d avg).")
+                    elif recent_avg < (long_avg * 0.9):
+                        insights.append(f" **Downtrend**: {name} is cooling off (-{(1 - recent_avg/long_avg)*100:.1f}% vs 30d avg).")
+                        
+                    return insights
+
+                st.markdown("###  AI Chart Analysis")
+                c_insights = generate_insights(df_c['apy'], current_asset_name)
+                t_insights = generate_insights(df_t['apy'], target_asset_name)
+                
+                for i in c_insights + t_insights:
+                    if "⚠️" in i or "🔻" in i:
+                        st.warning(i)
+                    else:
+                        st.info(i)
+
                 # Volatility/Risk Scorecard
-                st.markdown("### 🛡️ Risk Scorecard")
-                rc1, rc2 = st.columns(2)
+                st.markdown("###  Risk Scorecard")
                 
-                vol_c = df_c['apy'].std()
-                vol_t = df_t['apy'].std()
+                # Calculate Metrics
+                def calc_metrics(series):
+                    if series.empty: return 0, 0, 0
+                    vol = series.std()
+                    mean_apy = series.mean()
+                    sharpe = (mean_apy / vol) if vol > 0 else 0
+                    
+                    # Drawdown: Drop from Peak
+                    maximum = series.max()
+                    current = series.iloc[-1]
+                    max_dd = ((maximum - current) / maximum * 100) if maximum > 0 else 0
+                    
+                    return vol, sharpe, max_dd
+
+                c_vol, c_sharpe, c_dd = calc_metrics(combined["Current Asset (APY%)"])
+                t_vol, t_sharpe, t_dd = calc_metrics(combined["Target Asset (APY%)"])
+
+                rc1, rc2, rc3 = st.columns(3)
                 
-                rc1.metric(f" volatility ({current_asset_name})", f"{vol_c:.2f}%", help="Standard Deviation of APY")
-                rc2.metric(f" volatility ({target_asset_name})", f"{vol_t:.2f}%", delta=f"{vol_t-vol_c:.2f}%", delta_color="inverse")
+                rc1.metric(f"Volatility (StdDev)", f"{t_vol:.2f}%", delta=f"{(t_vol-c_vol):.2f}%", delta_color="inverse", help="Lower is better")
+                rc2.metric(f"Sharpe Ratio (Yield/Risk)", f"{t_sharpe:.2f}", delta=f"{(t_sharpe-c_sharpe):.2f}", help="Higher is better")
+                rc3.metric(f"Yield Decay (Peak-to-Now)", f"{t_dd:.2f}%", delta=f"{(t_dd-c_dd):.2f}%", delta_color="inverse", help="How much yield has dropped from 30d High")
+
             else:
                 st.warning("Historical data not available for one or both assets.")
 
 with tab3:
-    st.markdown("### 🍰 Portfolio Allocations")
+    st.markdown("###  Portfolio Allocations")
     
     # Current Allocation
     labels = [current_asset_name, "Cash/Other"]

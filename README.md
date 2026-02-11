@@ -15,7 +15,7 @@ This system combines machine learning, reinforcement learning, and blockchain te
 - **Optimize Gas**: Intelligent rebalancing that balances yield gains against transaction costs
 - **Ensure Security**: Multi-layered safety mechanisms with smart contract audits and defensive architecture
 
-## 📊 Key Features
+##  Key Features
 
 - **ML-Powered Yield Prediction**: LSTM models forecast 7-day APY with <10% MAPE
 - **Reinforcement Learning**: PPO-based agent optimizes rebalancing decisions
@@ -40,7 +40,7 @@ This system combines machine learning, reinforcement learning, and blockchain te
 
 See [MASTER_PLAN.md](./MASTER_PLAN.md) for comprehensive technical specification.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -210,7 +210,7 @@ python scripts/run_backtest.py --start 2024-01-01 --end 2025-12-31 --capital 100
 
 Please report security issues to security@example.com. Do NOT open public issues for vulnerabilities.
 
-## 📈 Performance Metrics (Backtest Results)
+##  Performance Metrics (Backtest Results)
 
 | Metric | Target | Actual (2024-2025 Backtest) |
 |--------|--------|----------------------------|

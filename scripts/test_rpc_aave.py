@@ -146,7 +146,7 @@ async def test_rpc_data_collection():
     aave_rpc = AaveV3RPC(alchemy)
     
     # Test Aave V3 data collection
-    logger.info("📊 Fetching Aave V3 reserve data via RPC...")
+    logger.info(" Fetching Aave V3 reserve data via RPC...")
     try:
         reserves = await aave_rpc.get_all_reserves_data()
         

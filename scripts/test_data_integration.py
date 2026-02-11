@@ -34,7 +34,7 @@ async def test_graph_client():
 
     # Test Aave V3
     try:
-        logger.info("\n📊 Testing Aave V3 Subgraph...")
+        logger.info("\n Testing Aave V3 Subgraph...")
         aave_reserves = await client.get_aave_reserves(first=5)
         if "reserves" in aave_reserves:
             reserves_list = aave_reserves["reserves"]
@@ -51,7 +51,7 @@ async def test_graph_client():
 
     # Test Uniswap V3
     try:
-        logger.info("\n📊 Testing Uniswap V3 Subgraph...")
+        logger.info("\n Testing Uniswap V3 Subgraph...")
         uni_pools = await client.get_uniswap_pools(first=5)
         if "pools" in uni_pools:
             pools_list = uni_pools["pools"]
@@ -68,7 +68,7 @@ async def test_graph_client():
 
     # Test Curve
     try:
-        logger.info("\n📊 Testing Curve Finance Subgraph...")
+        logger.info("\n Testing Curve Finance Subgraph...")
         curve_pools = await client.get_curve_pools(first=5)
         if "liquidityPools" in curve_pools:
             pools_list = curve_pools["liquidityPools"]
@@ -98,7 +98,7 @@ async def test_alchemy_client():
     client = AlchemyClient(alchemy_key)
 
     try:
-        logger.info("\n📊 Testing Alchemy RPC...")
+        logger.info("\n Testing Alchemy RPC...")
         
         # Get current block
         block_num = await client.get_block_number()
@@ -176,7 +176,7 @@ async def test_data_aggregation():
     try:
         aggregator = DataAggregator(db_url, alchemy_key or "demo", graph_key)
 
-        logger.info("\n📊 Collecting Aave V3 data...")
+        logger.info("\n Collecting Aave V3 data...")
         try:
             aave_data = await aggregator.collect_aave_data()
             if aave_data and "markets" in aave_data:
@@ -184,7 +184,7 @@ async def test_data_aggregation():
         except Exception as e:
             logger.warning(f"⚠️  Aave collection failed: {str(e)[:80]}")
 
-        logger.info("\n📊 Collecting Uniswap V3 data...")
+        logger.info("\n Collecting Uniswap V3 data...")
         try:
             uni_data = await aggregator.collect_uniswap_data()
             if uni_data and "pools" in uni_data:
@@ -192,7 +192,7 @@ async def test_data_aggregation():
         except Exception as e:
             logger.warning(f"⚠️  Uniswap collection failed: {str(e)[:80]}")
 
-        logger.info("\n📊 Collecting Curve Finance data...")
+        logger.info("\n Collecting Curve Finance data...")
         try:
             curve_data = await aggregator.collect_curve_data()
             if curve_data and "pools" in curve_data:

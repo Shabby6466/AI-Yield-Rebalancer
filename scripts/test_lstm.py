@@ -109,7 +109,7 @@ async def test_predictions():
             yield_dict = dict(zip(columns, yield_record))
             
             # Extract protocol features
-            logger.info(f"\n📊 {protocol_name} ({yield_dict.get('market_name', '')})")
+            logger.info(f"\n {protocol_name} ({yield_dict.get('market_name', '')})")
             logger.info(f"   Current APY: {yield_dict['current_apy']:.3f}%")
             
             # Create features
@@ -139,11 +139,11 @@ async def test_predictions():
             
             # Display prediction
             diff = pred - yield_dict['current_apy']
-            direction = "📈" if diff > 0 else "📉"
+            direction = "" if diff > 0 else ""
             
             logger.info(f"   🎯 Predicted APY (7d): {pred:.3f}%")
             logger.info(f"   {direction} Expected change: {diff:+.3f}%")
-            logger.info(f"   📊 Feature quality: {features.risk_score:.1f}/100")
+            logger.info(f"    Feature quality: {features.risk_score:.1f}/100")
             
             predictions_made += 1
             

@@ -48,7 +48,7 @@ echo ""
 RECORD_COUNT=$(PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -t -c "SELECT COUNT(*) FROM yield_metrics;" 2>/dev/null | tr -d ' ')
 
 if [ "$RECORD_COUNT" -gt 100 ]; then
-    echo -e "${BLUE}📊 Database already contains $RECORD_COUNT records${NC}"
+    echo -e "${BLUE} Database already contains $RECORD_COUNT records${NC}"
     echo "Skipping backfill (already done)"
     echo ""
 else

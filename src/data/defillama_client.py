@@ -94,6 +94,34 @@ class DefiLlamaClient:
         response = await self._get(f"/chart/{pool_id}")
         return response.get("data", [])
 
+    async def fetch_top_pools(self, chains: List[str] = ["Ethereum", "Base"], min_tvl: int = 1000000, limit: int = 10) -> List[Dict]:
+        """
+        Fetch top performing stablecoin pools on specific chains
+        
+        Args:
+            chains: List of chain names (case-insensitive)
+            min_tvl: Minimum TVL in USD
+            limit: Number of pools to return
+            
+        Returns:
+            List of top pools sorted by APY
+        """
+        all_pools = await self.fetch_all_yields()
+        chains_lower = [c.lower() for c in chains]
+        
+        filtered = [
+            p for p in all_pools
+            if p.get('chain', '').lower() in chains_lower
+            and p.get('tvlUsd', 0) >= min_tvl
+            and p.get('stablecoin', False)  # Focus on stablecoin pools for safety
+            and p.get('apy', 0) < 500       # Filter out obvious errors/scams > 500%
+        ]
+        
+        # Sort by APY descending
+        sorted_pools = sorted(filtered, key=lambda x: x.get('apy', 0), reverse=True)
+        
+        return sorted_pools[:limit]
+
     async def get_protocol_yields(self, protocol_slug: str) -> List[Dict]:
         """
         Fetch yields for a specific protocol (by slug)

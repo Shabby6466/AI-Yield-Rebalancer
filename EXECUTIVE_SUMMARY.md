@@ -1,4 +1,4 @@
-# 🚀 Enhanced ML Strategy - Executive Summary
+# Enhanced ML Strategy - Executive Summary
 
 ## Bottom Line
 

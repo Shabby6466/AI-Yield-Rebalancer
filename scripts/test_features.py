@@ -71,7 +71,7 @@ def test_feature_engineering():
     engineer = FeatureEngineer(db_conn)
     
     # Test 1: Create feature vector for a single protocol
-    logger.info("📊 Test 1: Single Protocol Feature Extraction")
+    logger.info(" Test 1: Single Protocol Feature Extraction")
     logger.info("-" * 80)
     
     protocol_id = protocols[0][0]
@@ -116,7 +116,7 @@ def test_feature_engineering():
                 logger.info(f"   Gas Price: {features.gas_price_gwei:.2f} gwei")
                 
                 # Test 2: Convert to numpy vector
-                logger.info(f"\n📊 Test 2: Feature Vector Conversion")
+                logger.info(f"\n Test 2: Feature Vector Conversion")
                 logger.info("-" * 80)
                 
                 vector = features.to_vector()
@@ -133,7 +133,7 @@ def test_feature_engineering():
                     logger.info("✅ Vector is clean (no NaN/Inf)")
                 
                 # Test 3: Feature names
-                logger.info(f"\n📊 Test 3: Feature Names")
+                logger.info(f"\n Test 3: Feature Names")
                 logger.info("-" * 80)
                 
                 feature_names = ProtocolFeatures.feature_names()
@@ -154,7 +154,7 @@ def test_feature_engineering():
                 traceback.print_exc()
     
     # Test 4: Training dataset creation (if enough data)
-    logger.info(f"\n📊 Test 4: Training Dataset Creation")
+    logger.info(f"\n Test 4: Training Dataset Creation")
     logger.info("-" * 80)
     
     # Check data range

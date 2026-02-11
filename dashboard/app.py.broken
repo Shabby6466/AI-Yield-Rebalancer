@@ -23,7 +23,7 @@ load_dotenv()
 # Page configuration
 st.set_page_config(
     page_title="DeFi Yield Rebalancing Dashboard",
-    page_icon="📊",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -207,16 +207,16 @@ def get_database_stats():
 
 def main():
     # Header
-    st.title("🚀 DeFi Yield Rebalancing System Dashboard")
+    st.title("DeFi Yield Rebalancing System Dashboard")
     st.markdown("**Real-time monitoring and analytics** | Updated: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     
     # Sidebar
     st.sidebar.header("📋 Navigation")
     page = st.sidebar.radio("Select View", [
         "🏠 Overview",
-        "📊 Performance Analytics",
+        " Performance Analytics",
         "💰 Portfolio State",
-        "📈 Market Data",
+        " Market Data",
         "⚙️ System Health",
         "🎯 Backtest Results"
     ])
@@ -246,11 +246,11 @@ def main():
         show_overvi� Strategy Evolution":
         show_strategy_evolution()
     elif page == "�ew()
-    elif page == "📊 Performance Analytics":
+    elif page == " Performance Analytics":
         show_performance()
     elif page == "💰 Portfolio State":
         show_portfolio()
-    elif page == "📈 Market Data":
+    elif page == " Market Data":
         show_market_data()
     elif page == "⚙️ System Health":
         show_system_health()
@@ -277,7 +277,7 @@ Enhanced ML Strategy v3.0 - Overview")
         
         with col2:
             st.metric(
-                "📈 Annualized",
+                " Annualized",
                 f"{enhanced_ml['Annualized Return (%)']:.2f}%"
             )
         
@@ -290,7 +290,7 @@ Enhanced ML Strategy v3.0 - Overview")
         
         with col4:
             st.metric(
-                "📉 Max Drawdown",
+                " Max Drawdown",
                 f"{enhanced_ml['Max Drawdown (%)']:.2f}%",
                 help="Maximum portfolio decline"
             )
@@ -321,7 +321,7 @@ Enhanced ML Strategy v3.0 - Overview")
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("📊 Strategy Performance Comparison")
+            st.subheader(" Strategy Performance Comparison")
             
             # Sort by return for better visualization
             sorted_df = backtest_df.sort_values('Total Return (%)', ascending=True)
@@ -331,7 +331,7 @@ Enhanced ML Strategy v3.0 - Overview")
                     y=sorted_df['Strategy'],
                     x=sorted_df['Total Return (%)'],
                     text=sorted_df['Total Return (%)'].apply(lambda x: f"{x:.2f}%"),
-                    textpo⚡ Sharpe Ratio (Risk-Adjusted Returns)")
+                    textpo Sharpe Ratio (Risk-Adjusted Returns)")
             
             sorted_df = backtest_df.sort_values('Sharpe Ratio', ascending=True)
             
@@ -360,7 +360,7 @@ Enhanced ML Strategy v3.0 - Overview")
                     y=backtest_df['Total Return (%)'],
           Optimization Journey
         st.markdown("---")
-        st.subheader("🚀 Optimization Journey: +159% Improvement")
+        st.subheader("Optimization Journey: +159% Improvement")
         
         col1, col2, col3 = st.columns(3)
         
@@ -492,7 +492,7 @@ Enhanced ML Strategy v3.0 - Overview")
         
         with col3:
             st.success(f"""
-            **📈 Consistent Performance**
+            ** Consistent Performance**
             
             Win rate: **{ml_driven['Win Rate (%)']:.1f}%**
             
@@ -509,7 +509,7 @@ Enhanced ML Strategy v3.0 - Overview")
     
     with col1:
         st.success("✅ Data Collection: ACTIVE")
-        st.info("📊 Database: CONNECTED")
+        st.info(" Database: CONNECTED")
     
     with col2:
         st.success("✅ ML Models: LOADED")
@@ -521,7 +521,7 @@ Enhanced ML Strategy v3.0 - Overview")
 
 def show_performance():
     """Display performance analytics"""
-    st.header("📊 Performance Analytics")
+    st.header(" Performance Analytics")
     
     backtest_df = load_backtest_results()
     
@@ -574,7 +574,7 @@ def show_performance():
         
         # Risk-adjusted metrics
         st.markdown("---")
-        st.subheader("📉 Risk Analysis")
+        st.subheader(" Risk Analysis")
         
         col1, col2 = st.columns(2)
         
@@ -622,7 +622,7 @@ def show_performance():
         
         # Efficiency metrics
         st.markdown("---")
-        st.subheader("⚡ Efficiency Metrics")
+        st.subheader(" Efficiency Metrics")
         
         col1, col2, col3 = st.columns(3)
         
@@ -665,7 +665,7 @@ def show_portfolio():
         st.markdown("---")
         
         # Placeholder for allocation (would come from actual portfolio state)
-        st.subheader("📊 Asset Allocation (Simulated)")
+        st.subheader(" Asset Allocation (Simulated)")
         
         st.info("💡 Note: In production, this would show real-time allocations from on-chain vault")
         
@@ -700,7 +700,7 @@ def show_portfolio():
         
         # Performance over time (simulated)
         st.markdown("---")
-        st.subheader("📈 Portfolio Growth (Simulated)")
+        st.subheader(" Portfolio Growth (Simulated)")
         
         days = int(ml_driven['Days Elapsed'])
         dates = pd.date_range(end=datetime.now(), periods=days, freq='D')
@@ -749,7 +749,7 @@ import numpy as np
 
 def show_market_data():
     """Display market data and trends"""
-    st.header("📈 Market Data & Asset Analytics")
+    st.header(" Market Data & Asset Analytics")
     
     try:
         yields_df = load_data()
@@ -831,7 +831,7 @@ def show_market_data():
         
         # APY trend over time
         st.markdown("---")
-        st.subheader("📊 APY Trends Over Time")
+        st.subheader(" APY Trends Over Time")
         
         # Select asset for trend
         unique_assets = yields_df['asset_pair'].unique()
@@ -953,7 +953,7 @@ def show_system_health():
     
     # System metrics
     st.markdown("---")
-    st.subheader("📊 System Metrics")
+    st.subheader(" System Metrics")
     
     col1, col2, col3 = st.columns(3)
     
@@ -989,7 +989,7 @@ def show_backtest_results():
     
     if backtest_df is not None:
         # Summary metrics
-        st.subheader("📊 Summary Metrics")
+        st.subheader(" Summary Metrics")
         
         ml_driven = backtest_df[backtest_df['Strategy'] == 'ML-Driven'].iloc[0]
         
@@ -1093,7 +1093,7 @@ def show_backtest_results():
     else:
         st.warning("No backtest results available. Run backtesting first.")
         
-        if st.button("🚀 Run Backtest Now"):
+        if st.button("Run Backtest Now"):
             with st.spinner("Running backtest..."):
                 # This would trigger the backtest
                 st.info("Backtest execution would be triggered here")

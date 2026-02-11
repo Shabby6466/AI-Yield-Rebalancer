@@ -73,7 +73,7 @@ async def backfill_uniswap_data(days_back: int = 90):
     pools_result = await client.query("uniswap", pools_query)
     pools = pools_result.get("pools", [])
     
-    logger.info(f"📊 Found {len(pools)} pools with TVL > $10K")
+    logger.info(f" Found {len(pools)} pools with TVL > $10K")
     
     # Get database connection
     conn = get_db_connection()
@@ -92,7 +92,7 @@ async def backfill_uniswap_data(days_back: int = 90):
         token1 = pool["token1"]["symbol"]
         asset_name = f"{token0}/{token1}"
         
-        logger.info(f"\n📈 Backfilling {asset_name}...")
+        logger.info(f"\n Backfilling {asset_name}...")
         
         # Query all daily snapshots for this pool
         query = """
