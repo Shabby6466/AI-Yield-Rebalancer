@@ -278,6 +278,60 @@ class TimeseriesDB:
             "db_path": self.db_path
         }
 
+    def get_latest_yields(self, stablecoin_only: bool = True, min_tvl: float = 1_000_000,
+                          chains: List[str] = None, max_apy: float = 500) -> List[Dict]:
+        """
+        Get the most recent yield snapshot for every pool.
+        This is what the dashboard should use instead of live API calls.
+        
+        Args:
+            stablecoin_only: Only return stablecoin pools
+            min_tvl: Minimum TVL in USD
+            chains: Filter by chain names (e.g. ['Ethereum', 'Base'])
+            max_apy: Filter out suspiciously high APYs
+            
+        Returns:
+            List of pool dicts sorted by APY descending
+        """
+        query = """
+            SELECT ys.pool_id, ys.timestamp, ys.apy, ys.tvl_usd, 
+                   ys.chain, ys.protocol, ys.symbol, ys.is_stablecoin
+            FROM yield_snapshots ys
+            INNER JOIN (
+                SELECT pool_id, MAX(timestamp) as max_ts
+                FROM yield_snapshots
+                GROUP BY pool_id
+            ) latest ON ys.pool_id = latest.pool_id AND ys.timestamp = latest.max_ts
+            WHERE ys.tvl_usd >= ?
+            AND ys.apy > 0
+            AND ys.apy < ?
+        """
+        params: list = [min_tvl, max_apy]
+
+        if stablecoin_only:
+            query += " AND ys.is_stablecoin = 1"
+
+        if chains:
+            placeholders = ','.join('?' * len(chains))
+            query += f" AND ys.chain IN ({placeholders})"
+            params.extend(chains)
+
+        query += " ORDER BY ys.apy DESC"
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+
+        return [dict(r) for r in rows]
+
+    def get_last_updated(self) -> Optional[str]:
+        """Get the timestamp of the most recent data collection"""
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT MAX(timestamp) FROM yield_snapshots"
+            ).fetchone()
+        return row[0] if row and row[0] else None
+
     def log_collection(self, pools_collected: int, duration: float, status: str = "success"):
         """Log a data collection event"""
         with sqlite3.connect(self.db_path) as conn:

@@ -1,14 +1,18 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import streamlit as st
 import requests
 import pandas as pd
 import time
-import asyncio
-# Import the client directly for the dashboard to browse pools (in a real app, the API would serve this)
-from src.data.defillama_client import DefiLlamaClient
 from src.backtest.engine import BacktestEngine
 from src.data.timeseries_db import TimeseriesDB
 from src.optimizer.trade_sizer import TradeSizer
 from src.backtest.prediction_tracker import PredictionTracker
+from src.execution.sim_control import SimController
+from web3 import Web3
+import json
+import os
 
 st.set_page_config(page_title="AI Yield Brain - Live Status", layout="wide")
 
@@ -25,39 +29,68 @@ except:
 # --- Test Portfolio Section ---
 st.markdown("###  Active Test Portfolio")
 
-@st.cache_data(ttl=3600)
 def fetch_valid_pools():
-    """Fetch real pools from Ethereum/Base with >$1M TVL"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    client = DefiLlamaClient()
-    all_pools = loop.run_until_complete(client.fetch_all_yields())
+    """Load fully-stablecoin pools from local DB — only battle-tested stables"""
+    db = TimeseriesDB()
+    pools = db.get_latest_yields(
+        stablecoin_only=True,
+        chains=['Ethereum', 'Base'],
+        min_tvl=1_000_000,
+        max_apy=50  # Cap at 50% — anything higher on stables is suspicious
+    )
     
-    # Filter for Stablecoins on ETH/Base
-    valid_chains = {'Ethereum', 'Base'}
-    stable_tokens = {'USDC', 'USDT', 'DAI', 'USDe', 'LUSD', 'crvUSD', 'GHO'}
+    # Tier 1: Major, battle-tested stablecoins only
+    TRUSTED_STABLES = {
+        # USD-pegged (proven)
+        'USDC', 'USDT', 'DAI', 'FRAX', 'LUSD', 'GHO', 'USDS',
+        'CRVUSD', 'PYUSD', 'GUSD', 'USDP', 'FRXUSD', 'USD0',
+        # Yield-bearing wrappers of trusted stables
+        'USDE', 'SUSDE', 'SDAI', 'SFRXUSD',
+        # EUR stables (Circle-backed)
+        'EURC', 'EUROC',
+        # Liquity v2
+        'BOLD',
+    }
+    
+    # Trusted protocols (proven, audited, not rugs)
+    TRUSTED_PROTOCOLS = {
+        'aave-v3', 'aave-v2', 'compound-v3', 'compound-v2',
+        'curve-dex', 'convex-finance', 'uniswap-v3',
+        'morpho', 'morpho-blue', 'sparklend', 'sky',
+        'maker', 'makerdao', 'yearn-finance', 'lido',
+        'aerodrome-v2', 'aerodrome-slipstream',
+        'fluid', 'euler', 'euler-v2',
+        'pendle', 'ethena', 'frax-ether',
+        'stargate', 'across', 'beefy',
+        'stake-dao', 'merkl',
+    }
+    
+    def is_fully_stable(symbol: str) -> bool:
+        """Check if ALL tokens in a pair are trusted stablecoins"""
+        tokens = symbol.upper().replace('/', '-').replace('_', '-').split('-')
+        return all(t.strip() in TRUSTED_STABLES for t in tokens if t.strip())
     
     filtered = []
-    for p in all_pools:
-        if p['chain'] in valid_chains and p['tvlUsd'] > 1_000_000:
-            # Check if symbol contains a stablecoin
-            if any(s in p['symbol'] for s in stable_tokens):
-                filtered.append({
-                    "name": f"{p['symbol']} ({p['project']}) - {p['chain']}",
-                    "id": p['pool'],
-                    "apy": p['apy'],
-                    "tvl": p['tvlUsd']
-                })
+    for p in pools:
+        if not is_fully_stable(p['symbol']):
+            continue
+        # Optional: also filter by trusted protocol
+        protocol = p.get('protocol', '').lower()
+        if protocol and not any(tp in protocol for tp in TRUSTED_PROTOCOLS):
+            continue
+        filtered.append({
+            "name": f"{p['symbol']} ({p['protocol']}) - {p['chain']}",
+            "id": p['pool_id'],
+            "apy": p['apy'],
+            "tvl": p['tvl_usd']
+        })
     
-    # Sort by APY descending
     return sorted(filtered, key=lambda x: x['apy'], reverse=True)
 
 try:
-    with st.spinner("Fetching active pools from Ethereum & Base..."):
-        valid_pools = fetch_valid_pools()
-        
+    valid_pools = fetch_valid_pools()
     if not valid_pools:
-        st.warning("⚠️ No valid stablecoin pools found on Ethereum/Base with >$1M TVL.")
+        st.warning("⚠️ No pools in database. Run: `python -m src.scheduler.collector --once`")
         st.stop()
         
     pool_options = {p['name']: p['id'] for p in valid_pools}
@@ -92,72 +125,131 @@ except Exception as e:
     st.error(f"Failed to load pools: {e}")
     st.stop()
 
-# Helper for Async Execution in Streamlit
-def run_async(coro):
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(coro)
 
-# Fetch Live Data for Selection immediately to show context
-async def get_live_context():
-    client = DefiLlamaClient()
-    return await client.fetch_pool_yields([current_asset_id, target_asset_id])
-
-context_pools = run_async(get_live_context())
-
-# Display Context
-if context_pools:
-    c_pool = next((p for p in context_pools if p['pool'] == current_asset_id), None)
-    t_pool = next((p for p in context_pools if p['pool'] == target_asset_id), None)
+# Display Context (from DB data, no API call)
+if valid_pools:
+    c_data = next((p for p in valid_pools if p['id'] == current_asset_id), None)
+    t_data = next((p for p in valid_pools if p['id'] == target_asset_id), None)
     
-    if c_pool and t_pool:
-        st.info(f" **Context:** You hold **${capital_input:,.0f}** in {current_asset_name} earning **{c_pool['apy']:.2f}%**. The opportunity is {target_asset_name} at **{t_pool['apy']:.2f}%**.")
+    if c_data and t_data:
+        st.info(f" **Context:** You hold **${capital_input:,.0f}** in {current_asset_name} earning **{c_data['apy']:.2f}%**. The opportunity is {target_asset_name} at **{t_data['apy']:.2f}%**.")
+    
+    # Show last update time
+    db = TimeseriesDB()
+    last_update = db.get_last_updated()
+    if last_update:
+        st.caption(f"Data as of: {last_update} UTC")
 
 
-# Helper: Fetch History
-@st.cache_data(ttl=3600)
+# Helper: Fetch History (from DB, no API call)
 def get_apy_history(pool_id):
-    """Fetch 30-day APY history"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    client = DefiLlamaClient()
-    try:
-        data = loop.run_until_complete(client.fetch_historical_yield(pool_id))
-        # API returns: {'data': [{'timestamp': '...', 'tvlUsd': ..., 'apy': ...}]}
-        # or list of dicts directly depending on endpoint wrapper. Client wrapper returns list.
-        if isinstance(data, dict) and 'data' in data:
-            data = data['data']
-        return data[-30:] # Last 30 points (usually daily)
-    except Exception as e:
-        return []
+    """Get 30-day APY history from local DB"""
+    db = TimeseriesDB()
+    history = db.get_pool_history(pool_id, days=30)
+    return history if history else []
 
 # --- Sidebar Scanner ---
 with st.sidebar:
-    st.markdown("###  Market Scanner")
+    st.markdown("### Market Scanner")
     st.markdown("Top Stablecoin Yields (ETH/Base)")
     
-    # Async Fetch for Sidebar
-    async def get_top_opps():
-        client = DefiLlamaClient()
-        return await client.fetch_top_pools(limit=5)
-    
+    # Read from DB — instant
     try:
-        top_pools = run_async(get_top_opps())
-        if top_pools:
-            for p in top_pools:
-                st.markdown(f"**{p['symbol']}** ({p['project'].title()})")
-                st.caption(f"**{p['apy']:.2f}%** | TVL: ${p['tvlUsd']/1e6:.1f}M")
+        db = TimeseriesDB()
+        top_db_pools = db.get_latest_yields(
+            stablecoin_only=True, chains=['Ethereum', 'Base'],
+            min_tvl=1_000_000
+        )[:5]
+        
+        if top_db_pools:
+            for p in top_db_pools:
+                st.markdown(f"**{p['symbol']}** ({p['protocol'].title()})")
+                st.caption(f"**{p['apy']:.2f}%** | TVL: ${p['tvl_usd']/1e6:.1f}M")
                 st.divider()
         else:
-            st.info("Scanning...")
+            st.info("No data yet.")
     except Exception:
         st.caption("Scanner offline")
+    
+    # Refresh button
+    st.markdown("---")
+    if st.button("Refresh Pool Data", key="refresh_data"):
+        with st.spinner("Fetching fresh data from DefiLlama..."):
+            import subprocess, sys
+            result = subprocess.run(
+                [sys.executable, "-m", "src.scheduler.collector", "--once"],
+                capture_output=True, text=True, timeout=30,
+                cwd="/Users/Akmal/Desktop/projects/defi rebalancing/AI-Yield-Rebalancer"
+            )
+            if result.returncode == 0:
+                st.success("Data refreshed!")
+                st.rerun()
+            else:
+                st.error(f"Refresh failed: {result.stderr[-200:]}")
+    
+    last_ts = TimeseriesDB().get_last_updated()
+    if last_ts:
+        st.caption(f"Last update: {last_ts} UTC")
 
 # --- Tabs Layout ---
-tab1, tab2, tab3, tab4 = st.tabs([" Live Decision", " Deep Dive Analytics", " Portfolio Composition", " Backtest"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    " Live Decision", 
+    " Deep Dive Analytics", 
+    " Portfolio Composition", 
+    " Strategy Backtest", 
+    " 📡 Live Stability Test",
+    " On-Chain Fork", 
+    " Sim Sandbox"
+])
+
+with tab5:
+    st.markdown("### 📡 Live Stability Test Monitor")
+    st.caption("Real-time monitoring of the autonomous rebalancer service during the long-duration test.")
+    
+    try:
+        tracker = PredictionTracker()
+        accuracy = tracker.get_accuracy_stats()
+        
+        # Dashboard Overview
+        lc1, lc2, lc3, lc4 = st.columns(4)
+        lc1.metric("Cycles Processed", accuracy['total_predictions'])
+        lc2.metric("Latest Decision", "Hold" if accuracy['total_predictions'] == 0 else tracker.get_all_predictions(1)[0]['prediction_type'])
+        lc3.metric("System Uptime", "Active")
+        lc4.metric("Risk Profile", os.getenv("RISK_TOLERANCE", "1.0"))
+
+        # Prediction Feed
+        st.markdown("#### Decision Feed (Latest First)")
+        preds = tracker.get_all_predictions(limit=10)
+        
+        if preds:
+            for p in preds:
+                with st.expander(f"Cycle {p['id']} - {p['timestamp'][11:16]} - {p['prediction_type']}"):
+                    fc1, fc2, fc3 = st.columns(3)
+                    fc1.write(f"**Confidence:** {p['confidence']*100:.1f}%")
+                    fc2.write(f"**Target APY:** {p['target_pool_apy']:.2f}%")
+                    fc3.write(f"**Status:** {p['prediction_type']}")
+                    st.write(f"**Reason:** {p['reason']}")
+        else:
+            st.info("Waiting for the first autonomous cycle to complete... (Updates every 10 mins)")
+            
+        # Live Log Simulation
+        st.markdown("#### Rebalancer Service Logs")
+        if st.checkbox("Show Logs", value=True):
+            log_path = "data/rebalancer.log"
+            if os.path.exists(log_path):
+                with open(log_path, "r") as f:
+                    # Read last 50 lines
+                    lines = f.readlines()
+                    tail = "".join(lines[-50:])
+                    st.code(tail)
+            else:
+                st.info("Log file not found yet. It will be created when the next cycle starts.")
+            
+            if st.button("🔄 Refresh Logs"):
+                st.rerun()
+            
+    except Exception as e:
+        st.error(f"Failed to load stability test data: {e}")
 
 with tab1:
     st.markdown("### AI Brain Decision")
@@ -228,11 +320,11 @@ with tab1:
             if hist_current and hist_target:
                 # Process Data
                 df_c = pd.DataFrame(hist_current)
-                df_c['date'] = pd.to_datetime(df_c['timestamp'])
+                df_c['date'] = pd.to_datetime(df_c['timestamp'], format='mixed')
                 df_c = df_c.set_index('date').sort_index()
                 
                 df_t = pd.DataFrame(hist_target)
-                df_t['date'] = pd.to_datetime(df_t['timestamp'])
+                df_t['date'] = pd.to_datetime(df_t['timestamp'], format='mixed')
                 df_t = df_t.set_index('date').sort_index()
                 
                 # Combine
@@ -545,21 +637,177 @@ with tab4:
     except Exception:
         st.info("Prediction tracker initializing...")
 
+# --- Tab 5: On-Chain Fork ---
+with tab5:
+    st.markdown("###  Local Mainnet Fork Status")
+    
+    w3 = Web3(Web3.HTTPProvider("http://localhost:8545"))
+    node_online = False
+    try:
+        node_online = w3.is_connected()
+    except:
+        pass
+
+    if not node_online:
+        st.warning("Local Fork (Anvil) is not running.")
+        if st.button("🚀 Start Local Fork & Deploy Strategy"):
+            with st.spinner("Starting Anvil and deploying contracts..."):
+                import subprocess
+                subprocess.run(["python", "scripts/start_local_fork.py"], check=True)
+                st.success("Fork started and StrategyHub deployed!")
+                st.rerun()
+    else:
+        st.success("Mainnet Fork Online (localhost:8545)")
+        
+        # Load Deployed Address
+        addr_file = "contracts/deployed_address.txt"
+        if os.path.exists(addr_file):
+            with open(addr_file, "r") as f:
+                strategy_addr = f.read().strip()
+            
+            st.code(f"StrategyHub: {strategy_addr}")
+            
+            # Show live balances if we can
+            try:
+                # ABI for getBalances()
+                abi = [
+                    {"inputs": [], "name": "getBalances", "outputs": [
+                        {"internalType": "uint256", "name": "aaveBalance", "type": "uint256"},
+                        {"internalType": "uint256", "name": "compoundBalance", "type": "uint256"},
+                        {"internalType": "uint256", "name": "idleBalance", "type": "uint256"},
+                        {"internalType": "uint256", "name": "total", "type": "uint256"}
+                    ], "stateMutability": "view", "type": "function"},
+                    {"inputs": [
+                        {"internalType": "uint256", "name": "newAaveBps", "type": "uint256"},
+                        {"internalType": "uint256", "name": "newCompoundBps", "type": "uint256"}
+                    ], "name": "rebalance", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+                    {"inputs": [], "name": "aaveAllocationBps", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
+                    {"inputs": [], "name": "compoundAllocationBps", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"}
+                ]
+                
+                contract = w3.eth.contract(address=strategy_addr, abi=abi)
+                bals = contract.functions.getBalances().call()
+                aave_bps = contract.functions.aaveAllocationBps().call()
+                comp_bps = contract.functions.compoundAllocationBps().call()
+                
+                f1, f2, f3, f4 = st.columns(4)
+                f1.metric("Aave Balance", f"${bals[0]/1e6:,.2f}", f"{aave_bps/100}% target")
+                f2.metric("Compound Balance", f"${bals[1]/1e6:,.2f}", f"{comp_bps/100}% target")
+                f3.metric("Idle USDC", f"${bals[2]/1e6:,.2f}")
+                f4.metric("Total Value", f"${bals[3]/1e6:,.2f}")
+                
+                # Rebalance Control
+                st.markdown("### ⚡ Manual Rebalance Control")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    aave_target = st.slider("Target Aave %", 0, 100, aave_bps // 100)
+                with col_b:
+                    comp_target = 100 - aave_target
+                    st.write(f"Remaining Compound: {comp_target}%")
+                
+                if st.button("Execute On-Chain Rebalance"):
+                    with st.spinner("Broadcasting rebalance..."):
+                        # Use default anvil account
+                        acct = w3.eth.account.from_key("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+                        tx = contract.functions.rebalance(aave_target * 100, comp_target * 100).build_transaction({
+                            'from': acct.address,
+                            'nonce': w3.eth.get_transaction_count(acct.address),
+                            'gas': 1000000,
+                            'gasPrice': w3.to_wei('20', 'gwei')
+                        })
+                        signed_tx = w3.eth.account.sign_transaction(tx, acct.key)
+                        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
+                        st.success(f"Rebalance successful! TX: {tx_hash.hex()}")
+                        time.sleep(2)
+                        st.rerun()
+                        
+            except Exception as e:
+                st.error(f"Failed to read contract: {e}")
+        else:
+            st.info("Fork is running but StrategyHub is not deployed. Restart the fork to redeploy.")
+
+# --- Tab 6: Simulation Sandbox ---
+with tab6:
+    st.markdown("### 🧪 On-Chain Simulation Sandbox (Anvil)")
+    
+    if node_online:
+        sim = SimController()
+        
+        # --- Time Warping ---
+        st.markdown("#### ⏳ Time Warping")
+        st.info("Advance time on the fork to observe interest accrual.")
+        
+        c1, c2, c3 = st.columns(3)
+        if c1.button("Jump +1 Hour"):
+            new_ts = sim.jump_forward(3600)
+            st.success(f"Jumped +1 hour. Current TS: {new_ts}")
+            st.rerun()
+        if c2.button("Jump +1 Day"):
+            new_ts = sim.jump_forward(86400)
+            st.success(f"Jumped +1 day. Current TS: {new_ts}")
+            st.rerun()
+        if c3.button("Jump +30 Days"):
+            new_ts = sim.jump_forward(30 * 86400)
+            st.success(f"Jumped +30 days. Current TS: {new_ts}")
+            st.rerun()
+
+        # --- Base Snapshots ---
+        st.markdown("#### 📸 State Snapshots")
+        st.info("Save current state to jump back after testing strategies.")
+        
+        col_snap1, col_snap2 = st.columns(2)
+        if col_snap1.button("📸 Create Snapshot"):
+            snap_id = sim.create_snapshot()
+            st.session_state['last_snapshot'] = snap_id
+            st.success(f"Snapshot #{snap_id} created.")
+        
+        last_snap = st.session_state.get('last_snapshot')
+        if last_snap:
+            if col_snap2.button(f"🔙 Revert to #{last_snap}"):
+                sim.revert_to_snapshot(last_snap)
+                st.success(f"Reverted to #{last_snap}!")
+                st.rerun()
+
+        # --- Security Testing ---
+        st.markdown("#### 🚨 Security & Risk Simulation")
+        st.info("Test the 'Panic Button' and emergency logic.")
+        
+        if st.button("🔥 Trigger Emergency Withdrawal", help="Pulls all funds out and pauses strategy"):
+            # Load Hub
+            addr_file = "contracts/deployed_address.txt"
+            if os.path.exists(addr_file):
+                with open(addr_file, "r") as f:
+                    strategy_addr = f.read().strip()
+                
+                with open("contracts/out/StrategyHub.sol/StrategyHub.json", "r") as f:
+                    hub_abi = json.load(f)["abi"]
+                
+                contract = w3.eth.contract(address=strategy_addr, abi=hub_abi)
+                acct = w3.eth.account.from_key("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+                
+                tx = contract.functions.emergencyWithdrawAll().transact({'from': acct.address})
+                st.error(f"EMERGENCY TRIGGERED. TX: {tx.hex()}")
+                time.sleep(2)
+                st.rerun()
+                
+    else:
+        st.warning("Simulation sandbox requires Local Fork to be online.")
+
+
 # --- Market Data Section ---
 st.markdown("---")
-st.markdown("### Real-Time Market Data (DeFi Llama)")
-async def get_market_data():
-    client = DefiLlamaClient()
-    pools = await client.fetch_pool_yields([current_asset_id, target_asset_id])
-    return pools
-
+st.markdown("### Stored Market Data")
 try:
-    pools_data = run_async(get_market_data())
-    df = pd.DataFrame(pools_data)
-    if not df.empty:
-        display_df = df[['symbol', 'project', 'chain', 'apy', 'tvlUsd']].copy()
-        display_df['apy'] = display_df['apy'].apply(lambda x: f"{x:.2f}%")
-        display_df['tvlUsd'] = display_df['tvlUsd'].apply(lambda x: f"${x:,.0f}")
-        st.table(display_df)
+    db = TimeseriesDB()
+    market_pools = db.get_latest_yields(stablecoin_only=True, chains=['Ethereum', 'Base'], min_tvl=1_000_000)
+    if market_pools:
+        df = pd.DataFrame(market_pools[:20])  # Top 20
+        display_df = df[['symbol', 'protocol', 'chain', 'apy', 'tvl_usd']].copy()
+        display_df.columns = ['Symbol', 'Protocol', 'Chain', 'APY', 'TVL']
+        display_df['APY'] = display_df['APY'].apply(lambda x: f"{x:.2f}%")
+        display_df['TVL'] = display_df['TVL'].apply(lambda x: f"${x:,.0f}")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No data. Click 'Refresh Pool Data' in the sidebar.")
 except Exception:
     pass

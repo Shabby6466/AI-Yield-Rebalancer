@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from .graph_client import GraphClient
 from .alchemy_client import AlchemyClient
+from .defillama_client import DefiLlamaClient
 from .rpc_collectors import AaveV3Collector, CurveFinanceCollector
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class DataAggregator:
         self.db_url = db_url
         self.graph_client = GraphClient(api_key=graph_api_key)
         self.alchemy_client = AlchemyClient(api_key=alchemy_api_key, network="eth-mainnet")
+        self.defillama_client = DefiLlamaClient()
         
         # RPC-based collectors
         self.aave_collector = AaveV3Collector(self.alchemy_client)
@@ -96,6 +98,22 @@ class DataAggregator:
             logger.error(f"Error collecting Curve data: {e}")
             raise
 
+    async def collect_defillama_data(self) -> Dict[str, Any]:
+        """Collect yield data across multiple protocols from DeFiLlama"""
+        logger.info("Collecting DeFiLlama yield data...")
+        try:
+            # Fetch top stablecoin pools (default filter)
+            top_pools = await self.defillama_client.fetch_top_pools()
+            
+            return {
+                "source": "defillama",
+                "pools": top_pools,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        except Exception as e:
+            logger.error(f"Error collecting DeFiLlama data: {e}")
+            raise
+
     async def collect_all_protocol_data(self) -> Dict[str, Any]:
         """
         Collect data from all three protocols in parallel
@@ -105,10 +123,11 @@ class DataAggregator:
         """
         logger.info("Starting data collection from all protocols...")
 
-        aave, uniswap, curve = await asyncio.gather(
+        aave, uniswap, curve, defillama = await asyncio.gather(
             self.collect_aave_data(),
             self.collect_uniswap_data(),
             self.collect_curve_data(),
+            self.collect_defillama_data(),
             return_exceptions=True,
         )
 
@@ -119,6 +138,7 @@ class DataAggregator:
                 uniswap if not isinstance(uniswap, Exception) else {"error": str(uniswap)}
             ),
             "curve": curve if not isinstance(curve, Exception) else {"error": str(curve)},
+            "defillama": defillama if not isinstance(defillama, Exception) else {"error": str(defillama)},
         }
 
     # =========================================================================
@@ -219,6 +239,34 @@ class DataAggregator:
                             float(pool.get("cumulativeVolumeUSD", 0)),
                         ),
                     )
+            
+            elif protocol_name == "defillama":
+                for pool in yields_data:
+                    # Map DeFiLlama project name to our protocol names if possible, 
+                    # otherwise skip or handle gracefully.
+                    # For POC, ensure protocol exists.
+                    cur.execute("SELECT id FROM protocols WHERE name ILIKE %s", (f"%{pool.get('project', '')}%",))
+                    protocol_id_row = cur.fetchone()
+                    
+                    if protocol_id_row:
+                        protocol_id = protocol_id_row[0]
+                        cur.execute(
+                            """
+                            INSERT INTO protocol_yields
+                            (protocol_id, asset, apy_percent, total_liquidity_usd, volume_24h_usd)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (protocol_id, asset, recorded_at) DO UPDATE
+                            SET apy_percent = EXCLUDED.apy_percent,
+                                total_liquidity_usd = EXCLUDED.total_liquidity_usd
+                            """,
+                            (
+                                protocol_id,
+                                pool.get("symbol", "unknown"),
+                                float(pool.get("apy", 0)),
+                                float(pool.get("tvlUsd", 0)),
+                                0 # Volume not always available in same structure
+                            ),
+                        )
 
             conn.commit()
             inserted = cur.rowcount
@@ -364,6 +412,10 @@ class DataAggregator:
             # Insert Curve data
             if "pools" in all_data.get("curve", {}):
                 self.insert_protocol_yields("curve", all_data["curve"]["pools"])
+
+            # Insert DeFiLlama data
+            if "pools" in all_data.get("defillama", {}):
+                self.insert_protocol_yields("defillama", all_data["defillama"]["pools"])
 
             end_time = datetime.utcnow()
             duration = (end_time - start_time).total_seconds()

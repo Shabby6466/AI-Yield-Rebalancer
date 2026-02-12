@@ -1,305 +1,173 @@
-# AI-Driven DeFi Yield Rebalancing System
+# 🏗️ AI-Yield-Rebalancer: System Architecture
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Solidity 0.8.20](https://img.shields.io/badge/solidity-0.8.20-363636.svg)](https://soliditylang.org/)
-
-An autonomous AI-powered system that maximizes Annual Percentage Yield (APY) across multiple DeFi protocols while maintaining strict risk controls and capital safety.
-
-## 🎯 Project Overview
-
-This system combines machine learning, reinforcement learning, and blockchain technology to:
-
-- **Maximize Yield**: Automatically allocate capital across Aave, Curve, Uniswap, and other DeFi protocols
-- **Minimize Risk**: Real-time monitoring with automated kill-switches for exploits, de-pegging, and impermanent loss
-- **Optimize Gas**: Intelligent rebalancing that balances yield gains against transaction costs
-- **Ensure Security**: Multi-layered safety mechanisms with smart contract audits and defensive architecture
-
-##  Key Features
-
-- **ML-Powered Yield Prediction**: LSTM models forecast 7-day APY with <10% MAPE
-- **Reinforcement Learning**: PPO-based agent optimizes rebalancing decisions
-- **Risk Scoring Engine**: Multi-dimensional protocol safety assessment (0-100 scale)
-- **Kill-Switch Mechanisms**: 5 on-chain + 3 off-chain triggers for capital protection
-- **Gas Optimization**: EIP-1559 aware with minimum threshold logic
-- **Real-Time Monitoring**: Grafana dashboards + PagerDuty alerting
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Data Ingestion (The Graph, Alchemy, Dune)             │
-│  ↓                                                      │
-│  Risk Assessment Engine (XGBoost, Multi-Scoring)       │
-│  ↓                                                      │
-│  AI Inference (LSTM Prediction + PPO Rebalancing)      │
-│  ↓                                                      │
-│  Execution Layer (Smart Contracts + Keeper)            │
-└─────────────────────────────────────────────────────────┘
-```
-
-See [MASTER_PLAN.md](./MASTER_PLAN.md) for comprehensive technical specification.
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.10+
-- Node.js 18+
-- Foundry (for smart contract development)
-- PostgreSQL 14+ with TimescaleDB extension
-- Redis 7+
-
-### Installation
-
-```bash
-# Clone repository
-git clone https://github.com/yourusername/defi-yield-rebalancer.git
-cd defi-yield-rebalancer
-
-# Install Python dependencies
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-# Install Foundry (smart contracts)
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
-
-# Install smart contract dependencies
-cd contracts
-forge install
-cd ..
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your API keys (Alchemy, The Graph, etc.)
-
-# Initialize database
-psql -U postgres -f db/schema.sql
-```
-
-### Running the System (Development)
-
-```bash
-# Terminal 1: Start data ingestion service
-python -m src.data.ingestion_service
-
-# Terminal 2: Start ML inference API
-python -m src.ml.inference_api
-
-# Terminal 3: Start keeper service (testnet)
-python -m src.execution.keeper --network goerli
-
-# Terminal 4: Start monitoring dashboard
-docker-compose up grafana prometheus
-```
-
-## 📂 Project Structure
-
-```
-defi-yield-rebalancer/
-├── contracts/              # Solidity smart contracts
-│   ├── src/
-│   │   ├── Vault.sol       # ERC4626 vault for user deposits
-│   │   ├── StrategyHub.sol # Rebalancing logic
-│   │   ├── KillSwitch.sol  # Emergency safety mechanisms
-│   │   └── adapters/       # Protocol integration (Aave, Curve, etc.)
-│   ├── test/               # Foundry tests
-│   └── foundry.toml
-├── src/
-│   ├── data/               # Data ingestion and processing
-│   │   ├── ingestion_service.py
-│   │   ├── graph_client.py
-│   │   └── feature_engineering.py
-│   ├── ml/                 # Machine learning models
-│   │   ├── yield_predictor.py  # LSTM model
-│   │   ├── risk_scorer.py      # XGBoost classifier
-│   │   ├── rl_agent.py         # PPO rebalancer
-│   │   └── inference_api.py
-│   ├── risk/               # Risk assessment engine
-│   │   ├── scoring.py
-│   │   ├── kill_switch.py
-│   │   └── anomaly_detector.py
-│   ├── execution/          # Transaction execution
-│   │   ├── keeper.py
-│   │   ├── gas_optimizer.py
-│   │   └── signing.py
-│   └── backtesting/        # Simulation framework
-│       ├── engine.py
-│       ├── environment.py
-│       └── analysis.py
-├── models/                 # Trained ML models
-├── data/                   # Datasets and caches
-├── scripts/                # Utility scripts
-│   ├── deploy_contracts.py
-│   ├── train_models.py
-│   └── run_backtest.py
-├── docs/                   # Additional documentation
-│   ├── ARCHITECTURE.md
-│   ├── API_SPEC.md
-│   └── SECURITY.md
-├── monitoring/             # Grafana dashboards, Prometheus config
-├── tests/                  # Python unit tests
-├── MASTER_PLAN.md          # Comprehensive technical specification
-├── requirements.txt
-├── package.json
-├── .env.example
-├── .gitignore
-└── README.md
-```
-
-## 📖 Documentation
-
-- **[Master Plan](./MASTER_PLAN.md)**: Comprehensive 50+ page technical specification
-  - System Architecture Blueprint
-  - AI & ML Strategy (LSTM, XGBoost, RL)
-  - Risk Assessment & Mitigation
-  - Technology Stack Details
-  - 3-Phase Roadmap (PoC → Risk Sentinel → MVP)
-
-- **[Architecture Guide](./docs/ARCHITECTURE.md)**: Component interactions and data flow
-- **[API Specification](./docs/API_SPEC.md)**: REST API and smart contract interfaces
-- **[Security Documentation](./docs/SECURITY.md)**: Audit requirements and incident response
-
-## 🧪 Testing
-
-### Smart Contracts
-
-```bash
-cd contracts
-forge test -vvv                    # Run all tests with verbose output
-forge test --match-test testKillSwitch  # Run specific test
-forge coverage                     # Code coverage report
-forge snapshot                     # Gas usage snapshots
-```
-
-### Python
-
-```bash
-pytest tests/ -v                   # Run all unit tests
-pytest tests/test_ml.py           # Test ML models
-pytest tests/test_risk.py --cov   # Test risk engine with coverage
-```
-
-### Backtesting
-
-```bash
-python scripts/run_backtest.py --start 2024-01-01 --end 2025-12-31 --capital 1000000
-```
-
-## 🔐 Security
-
-### Audits
-
-- **Status**: Pre-audit (testnet phase)
-- **Planned Auditors**: Trail of Bits, OpenZeppelin, Certik
-- **Bug Bounty**: $500K max payout (post-audit)
-
-### Key Security Features
-
-- ✅ Multi-signature governance (Gnosis Safe 2/3)
-- ✅ HSM-backed transaction signing (AWS KMS)
-- ✅ 5 on-chain kill-switch triggers
-- ✅ 3 off-chain anomaly detectors
-- ✅ Rate limiting (max 4 rebalances/day)
-- ✅ Allowlist for protocol interactions
-- ✅ Emergency pause function
-
-### Reporting Vulnerabilities
-
-Please report security issues to security@example.com. Do NOT open public issues for vulnerabilities.
-
-##  Performance Metrics (Backtest Results)
-
-| Metric | Target | Actual (2024-2025 Backtest) |
-|--------|--------|----------------------------|
-| Net APY | >5% | **7.2%** ✅ |
-| Sharpe Ratio | >2.0 | **2.4** ✅ |
-| Max Drawdown | <10% | **6.3%** ✅ |
-| Gas Costs | <0.5% AUM | **0.3%** ✅ |
-| Win Rate | >60% | **68%** ✅ |
-
-*Note: Past performance does not guarantee future results. Backtests may not reflect live trading conditions.*
-
-## 🗺️ Roadmap
-
-### Phase 1: Proof of Concept (Months 1-3) ✅
-- [x] Data pipeline implementation
-- [x] LSTM yield forecasting model
-- [x] XGBoost risk classifier
-- [x] Backtesting framework
-- [x] Performance validation
-
-### Phase 2: Risk Sentinel (Months 4-6) 🔄
-- [x] Risk scoring engine
-- [x] Kill-switch mechanisms
-- [x] Adversarial testing
-- [ ] External security review
-- [ ] Incident response procedures
-
-### Phase 3: MVP (Months 7-10) 📋
-- [ ] Smart contract development
-- [ ] RL agent training (PPO)
-- [ ] Testnet deployment
-- [ ] Live testing (4 weeks)
-- [ ] External audit
-
-### Phase 4: Mainnet Launch (Month 11+) 🎯
-- [ ] Mainnet deployment ($100K cap)
-- [ ] Gradual scaling ($500K → $2M → $10M)
-- [ ] Multi-protocol expansion
-- [ ] L2 deployments (Arbitrum, Optimism)
-
-## 🛠️ Tech Stack
-
-### Blockchain
-- **Smart Contracts**: Solidity 0.8.20 + Foundry
-- **Data**: The Graph, Alchemy, Dune Analytics
-- **Oracles**: Chainlink Price Feeds
-
-### Machine Learning
-- **Deep Learning**: PyTorch 2.1.0
-- **Reinforcement Learning**: Stable-Baselines3
-- **Traditional ML**: XGBoost, scikit-learn
-- **Training**: PyTorch Lightning, TensorBoard
-
-### Infrastructure
-- **Database**: TimescaleDB (PostgreSQL)
-- **Caching**: Redis 7
-- **API**: FastAPI
-- **Monitoring**: Grafana, Prometheus, PagerDuty
-- **Cloud**: AWS (EC2, RDS, KMS)
-
-## 🤝 Contributing
-
-This is currently a private R&D project. Contributions will be opened after mainnet launch.
-
-## 📜 License
-
-MIT License - see [LICENSE](./LICENSE) for details
-
-## ⚠️ Disclaimer
-
-This software is experimental and provided "as is" without warranties. DeFi investments carry significant risks including:
-
-- Smart contract vulnerabilities
-- Impermanent loss
-- Market volatility
-- Oracle failures
-- Regulatory uncertainty
-
-**Never invest more than you can afford to lose.** This system is not financial advice.
-
-## 📞 Contact
-
-- **Project Lead**: faizan@example.com
-- **Twitter**: [@DeFiYieldAI](https://twitter.com/defiyieldai)
-- **Discord**: [Join Server](https://discord.gg/defiyield)
-- **Documentation**: [docs.defiyield.ai](https://docs.defiyield.ai)
+This document provides a comprehensive deep-dive into the 4-layer architecture of the AI-Driven DeFi Yield Rebalancer. It details the technology stack, data processing flows, and confidence metrics for each component.
 
 ---
 
-**Built with ❤️ for DeFi by the Yield Optimization Research Team**
+## 🗺️ High-Level System Overview
+The system follows a **Closed-Loop Control** pattern, often referred to as the "Eyes, Brain, Safety, and Hands" model. 
 
-*Last Updated: February 8, 2026*
+```mermaid
+graph TD
+    Data[Layer 1: Eyes] --> AI[Layer 2: Brain]
+    AI --> Risk[Layer 3: Safety]
+    Risk --> Exec[Layer 4: Hands]
+    Exec --> Chain[Blockchain]
+    Chain --> Data
+```
+
+---
+
+## 🛠️ Technology Stack
+
+| Layer  | Component | Technology | Confidence |
+| :---   | :---      | :---       | :---       |
+| **Layer 1: Eyes** | Data Ingestion | Python, DeFiLlama Yields API, Dune Analytics SQL, TimescaleDB, ppsycopg2 | **High (95%)** |
+
+| **Layer 2: Brain** | Decision Engine | Stable-Baselines3 (PPO), Gymnasium, NumPy, LSTM (Yield Prediction) | **Medium (75%)** |
+
+| **Layer 3: Safety** | Risk Management | Chainlink Data Feeds, Liquidity Depth (SlippageClient), Circuit Breaker Patterns | **High (90%)** |
+
+| **Layer 4: Hands** | Execution | Flashbots Relay (MEV-Safe), Web3.py, Anvil (Local Forking), StrategyHub Smart Contract | **High (95%)** |
+
+---
+
+## 🔍 Detailed Data Processing & confidence
+
+### 1. Layer 1: The "Eyes" (Data & Infrastructure)
+*   **Processing**: 
+    1.  The `DataAggregator` polls DeFiLlama every hour for top-performing stablecoin pools.
+    2.  Dune Analytics provides macro-level "Black Swan" metrics (historical volatility peaks).
+    3.  Data is normalized and stored in **TimescaleDB hypertables**, which optimize time-series queries for the AI to look at "1-week trends" vs "current APY."
+*   **Confidence Reasoning**: DeFiLlama is the industry standard for yield data. TimescaleDB ensures data persistence even under heavy loads.
+
+### 2. Layer 2: The "Brain" (AI Inference)
+*   **Processing**:
+    1.  **State Extraction**: The system takes 32 features per pool (Normalized APY, Log-TVL, Risk Score, Gas Prices, etc.).
+    2.  **PPO Inference**: The trained Reinforcement Learning agent (Proximal Policy Optimization) evaluates the state.
+    3.  **Reward Function**: Unlike simple "best APY" logic, the brain optimizes for `Yield - Gas - Risk`. It learned that rebalancing for 0.5% gain while paying $100 in gas is a losing move.
+*   **Confidence Reasoning**: RL is excellent for complex optimization but requires massive historical data for "Elite" performance. The current prototype is solid but gains confidence as it sees more real-world market cycles.
+
+### 3. Layer 3: The "Safety" (Risk Guard)
+*   **Processing**:
+    1.  **Circuit Breaker**: If Chainlink detects a stablecoin (USDC/DAI) de-pegging below $0.98, all moves are frozen.
+    2.  **Slippage Check**: Using the `SlippageClient`, if a $100k move causes >0.5% price impact (detected via 1inch/CoW simulation), the trade is aborted.
+*   **Confidence Reasoning**: These are deterministic, hard-coded rules. They are the most predictable and reliable part of the system.
+
+### 4. Layer 4: The "Hands" (MEV-Safe Execution)
+*   **Processing**:
+    1.  **Transaction Builder**: Converts AI weights into `StrategyHub.rebalance()` calldata.
+    2.  **Flashbots Relay**: Transactions are bundled and sent directly to miners. This bypasses the public mempool, making it impossible for bots to "sandwich" your trade.
+    3.  **Local Simulation**: Every bundle is simulated on a local node before being sent to the relay.
+*   **Confidence Reasoning**: Flashbots is the gold standard for institutional DeFi execution. The local simulation layer prevents "burning" gas on trades that would revert.
+
+---
+
+## 🔄 The Life of a Rebalance
+1.  **Trigger**: The `RebalancerService` wakes up (e.g., every 1 hour).
+2.  **Market Check**: Any de-pegs? No. Any TVL crashes? No.
+3.  **Brain Inference**: RL Model says "Aave USDC is 8%, but Compound is 12%. Moving 50% capital is profitable after gas."
+4.  **Slippage Validation**: "Can I move $500k without losing $5k?" Yes. 
+5.  **Bundling**: Flashbots bundle is created.
+6.  **Simulation**: Bundle simulated on the latest block. Success.
+7.  **Execution**: Bundle sent to Relay.
+8.  **Confirmation**: Cycle complete. Data updated in TimescaleDB for the next step.
+
+---
+
+
+## TEST CASE
+The system will run in Continuous Autonomous Mode on your local Mainnet fork. Every 10 minutes (accelerated for this test), the following 4-layer cycle will trigger:
+
+**Layer 1 (Eyes)**: Poll DeFiLlama for real-time yields across Aave, Uniswap, and Curve. It will append this data to your TimescaleDB to build its short-term memory of market trends.
+
+**Layer 2 (Brain)**: Your trained PPO AI Agent will look at the new data. It will weigh the yields against the current Gas Prices on your fork and decide on the "Target Allocation."
+
+**Layer 3 (Safety)**:
+The Chainlink Guard will check if USDC/DAI is stable.
+The Slippage Guard will run a simulation: "If I move $100k now, do I lose more than 0.5% in price impact?"
+
+**Layer 4 (Hands)**: If the AI finds a profitable move (Yield Gain > Gas + Slippage), it will sign an EVM transaction and execute it on the StrategyHub contract.
+
+
+**What We Are Expecting (Success Criteria)**
+During this long-duration test, we are looking for the following "High Confidence" behaviors:
+
+**Intelligence over Impatience**: We expect the AI to HOLD most of the time. It should only move if it spots a significant yield spike (e.g., a pool jumping from 5% to 15%) that justifies the $50-$100 gas cost.
+
+**Zero-Crash Stability**: The orchestrator must handle network timeouts (e.g., if DeFiLlama's API blips) and database locks without stopping.
+
+**Safety First**: If a pool has extremely low TVL, the `LiquidityFilter` should automatically block the AI's attempt to enter it.
+
+**Transaction Integrity**: Every rebalance must produce a valid transaction hash and receipt on your local Anvil node.
+
+---
+
+## 🛠️ Under the Hood: Microscopic Details
+
+### 💰 Capital & Amounts
+*   **Source of Funds**: In this POC, we assume a portfolio of **$100,000 USD**. 
+*   **Smart Contract Management**: The `StrategyHub.sol` contract (deployed on your local fork) acts as the vault. It holds the actual assets (USDC, USDT, etc.) in various protocols (Aave, Compound).
+*   **Balance Tracking**: The `RebalancerService` queries the contract's `getBalances()` function to know exactly how much is sitting in "Idle" cash vs "Working" APY pools.
+
+### ⛽ Gas Cost Processing
+*   **Real-Time Tracking**: The system calls `w3.eth.gas_price` at the start of every cycle.
+*   **Profitability Math**: The "Brain" doesn't just look at APY. It calculates:
+    `Potential Profit ($) = (Capital * APY_Difference * Days_In_Position) - (Estimated_Gas_Units * Gas_Price)`
+*   **Safety Buffer**: Rebalances are only triggered if the expected profit over a 7-day window covers the gas cost at least **2x**.
+
+### 📊 Data Sources (The Evidence)
+*   **Primary Eyes**: **DeFiLlama API** (`/yields`). This provides current APY, TVL, and 1-day yield changes for 10,000+ pools.
+*   **Historical Memory**: **TimescaleDB**. Every hour, the `DataAggregator` saves a snapshot of the market. This allows the AI to detect if an 18% APY is a "flash spike" or a "stable trend."
+*   **Price Veracity**: **Chainlink Data Feeds**. Used to ensure the value of the portfolio is accurate and to detect stablecoin de-pegs (e.g., if USDC drops below $0.98).
+
+### 🛡️ The "Check" Logic (Step-by-Step)
+Every 10 minutes, the `RebalancerService.run_cycle()` executes this exact checklist:
+1.  **Network Check**: Is the local fork (Anvil) reachable?
+2.  **Safety Check**: Does `CircuitBreaker.py` see any market panic? (Check Chainlink).
+3.  **Inference**: PPO Model takes the 32-dimensional feature vector.
+4.  **Slippage Check**: `SlippageClient.py` simulates the trade size ($100k) via 1inch. If the "Impact" > 0.5%, it kills the cycle.
+5.  **Nonce Management**: Web3.py fetches the current `nonce` for the `KEEPER_PRIVATE_KEY` to ensure no transaction overlaps.
+
+### 🔄 Trading Execution (How it moves money)
+*   **Local Testing**: The service signs EIP-1559 transactions and sends them directly to `localhost:8545`. 
+*   **Production**: The service bundles transactions and sends them to the **Flashbots Relay**. This creates a "Private Lane" to the miners, so no one can see our trade until it's already confirmed in a block.
+*   **Smart Contract Logic**: `StrategyHub.rebalance(uint256 newAaveBps, uint256 newCompBps)` is the only entry point. It handles the actual shifting of USDC between Aave and Compound in a single atomic transaction.
+
+---
+
+## 📈 System Health & Logging
+*   **Log Location**: `data/rebalancer.log` captures every minor event.
+*   **Dashboard Sync**: The Streamlit app tails this log file to show you precisely when the AI is "Thinking" vs "Acting."
+
+---
+
+## 🧠 Decoding AI Metrics: The Logic of the Decision
+
+When looking at the dashboard, the "Brain" outputs specific numbers that determine the system's actions. Here is the mathematical breakdown:
+
+### 🎯 Target APY (e.g., 209.44%)
+*   **What it is**: This is the absolute APY (Annual Percentage Yield) of the pool the AI has prioritized as the #1 opportunity.
+*   **Why is it so high?**: In DeFi, yields spike due to **Incentives** (governance tokens like CRV/AERO being distributed) or **Leverage** (e.g., Ethena/Pendle yield-stripping). Even stablecoins can hit 200%+ APY for short bursts when volume is high or liquidity is thin.
+*   **Source**: Pulled directly from DeFiLlama's live feed and mapped to the AI's feature vector.
+
+### 🔋 Confidence / Weight (e.g., 56.5%)
+*   **What it is**: In Reinforcement Learning, the agent outputs an **Allocation Weight** (Softmax output). 
+*   **Calculation**: If the AI suggests 56.5% weight, it means it wants to move a majority of the portfolio into that specific pool. We interpret this "Intensity of Allocation" as **Confidence**.
+*   **The Threshold**: 
+    *   **Weight > 50%**: Status becomes `REBALANCE`. The AI is certain enough to trigger capital movement.
+    *   **Weight < 50%**: Status becomes `HOLD`. The AI is uncertain or the gains don't justify the risk/gas.
+
+### 📜 Status: REBALANCE vs HOLD
+*   **REBALANCE**: Triggered when the AI identifies a pool that is "Dominant" (Weights > 0.5).
+*   **HOLD**: Triggered when no single pool stands out strongly, or when the cost of moving (Gas + Slippage) is higher than the expected gain from the new APY.
+
+### 📝 Reason Strings (Traceability)
+*   **Example**: `Risk Tolerance: 0.1, Top Allocation: 56.5%`
+*   **Meaning**: This tells you that because you set a **Low Risk Tolerance** (Aggressive), the AI is willing to chase that high 200%+ APY. If you set `RISK_TOLERANCE=1.0`, the AI might ignore that 200% pool if its "Risk Score" (volatility/TVL ratio) is too high.
+
+---
+
+## 📈 Database Persistence
+*   **Predictions.db**: Every one of these metrics is saved to a local SQLite database (`data/predictions.db`).
+*   **Auto-Validation**: After 7 days, the system checks the actual APY of that 209% pool. If it stayed high, the AI gets a "Reward" (Confidence increases). If it crashed, the AI "Learns" it was a yield trap.

@@ -37,13 +37,6 @@ class DuneClient:
     ) -> Dict[str, Any]:
         """
         Execute a custom SQL query directly
-        
-        Args:
-            query_sql: SQL query string
-            params: Query parameters
-            
-        Returns:
-            Query results
         """
         url = f"{self.base_url}/query/execute"
         payload = {
@@ -58,137 +51,42 @@ class DuneClient:
                 )
                 
                 if response.status_code != 200:
-                    logger.error(
-                        f"Dune API error: {response.status_code} - {response.text}"
-                    )
+                    logger.error(f"Dune API error: {response.status_code} - {response.text}")
                     return {"error": response.text, "status": response.status_code}
                 
-                return response.json()
+                execution_uuid = response.json().get("execution_id")
+                return await self.poll_query_result(execution_uuid)
         except Exception as e:
             logger.error(f"Error executing Dune SQL query: {e}")
             return {"error": str(e)}
 
-    async def execute_query(
-        self,
-        query_id: int,
-        params: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Execute a saved Dune query
-
-        Args:
-            query_id: Dune query ID
-            params: Query parameters
-
-        Returns:
-            Query results
-        """
-        url = f"{self.base_url}/query/{query_id}/execute"
-        payload = {"parameters": []} if params is None else {"parameters": params}
-
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    url, json=payload, headers=self.headers
-                )
-
-                if response.status_code != 200:
-                    logger.error(
-                        f"Dune API error: {response.status_code} - {response.text}"
-                    )
-                    raise Exception(f"Dune API error: {response.status_code}")
-
-                return response.json()
-        except Exception as e:
-            logger.error(f"Error executing Dune query {query_id}: {e}")
-            raise
-
-    async def get_query_result(
-        self,
-        execution_uuid: str,
-    ) -> Dict[str, Any]:
-        """
-        Get results from a query execution
-
-        Args:
-            execution_uuid: Execution UUID from execute_query
-
-        Returns:
-            Query results
-        """
-        url = f"{self.base_url}/execution/{execution_uuid}/results"
-
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, headers=self.headers)
-
-                if response.status_code != 200:
-                    logger.error(
-                        f"Dune API error: {response.status_code} - {response.text}"
-                    )
-                    raise Exception(f"Dune API error: {response.status_code}")
-
-                return response.json()
-        except Exception as e:
-            logger.error(f"Error getting Dune query results: {e}")
-            raise
-    
-    async def get_latest_results(
-        self,
-        query_id: int,
-    ) -> Dict[str, Any]:
-        """
-        Get latest cached results from a saved query
-        
-        Args:
-            query_id: Dune query ID
+    async def poll_query_result(self, execution_uuid: str, poll_interval: int = 5) -> Dict[str, Any]:
+        """Poll for results until the query execution is complete."""
+        while True:
+            result = await self.get_query_result(execution_uuid)
+            state = result.get("state")
             
-        Returns:
-            Latest query results
-        """
-        url = f"{self.base_url}/query/{query_id}/results"
-        
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, headers=self.headers)
-                
-                if response.status_code != 200:
-                    logger.error(
-                        f"Dune API error: {response.status_code} - {response.text}"
-                    )
-                    return {"error": response.text, "status": response.status_code}
-                
-                return response.json()
-        except Exception as e:
-            logger.error(f"Error getting latest Dune results: {e}")
-            return {"error": str(e)}
+            if state == "QUERY_STATE_COMPLETED":
+                return result
+            elif state in ["QUERY_STATE_FAILED", "QUERY_STATE_CANCELLED"]:
+                logger.error(f"Dune query {execution_uuid} failed with state: {state}")
+                return result
+            
+            logger.info(f"Query {execution_uuid} is in state {state}. Retrying in {poll_interval}s...")
+            await asyncio.sleep(poll_interval)
 
-    # =========================================================================
-    # Protocol-Specific Queries
-    # =========================================================================
+    async def get_query_result(self, execution_uuid: str) -> Dict[str, Any]:
+        """Get results from a query execution (non-polling)."""
+        url = f"{self.base_url}/execution/{execution_uuid}/results"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(url, headers=self.headers)
+            return response.json()
 
-    async def get_aave_protocol_metrics(
-        self,
-        days: int = 30,
-    ) -> Dict[str, Any]:
-        """
-        Get Aave protocol metrics over time
-
-        Args:
-            days: Number of days of historical data
-
-        Returns:
-            Aave metrics (TVL, utilization, APY)
-        """
-        logger.info(f"Fetching Aave metrics for last {days} days")
-
-        # These would be actual Dune query IDs that you've created
-        # For now, return structure
-        return {
-            "protocol": "aave",
-            "days": days,
-            "metrics": [],
-        }
+    async def get_aave_protocol_metrics(self, days: int = 30) -> Dict[str, Any]:
+        """Fetch real Aave metrics using SQL."""
+        from src.data.dune_queries import AaveV3Queries
+        sql = AaveV3Queries.get_market_rates()
+        return await self.execute_query_sql(sql)
 
     async def get_uniswap_pool_analytics(
         self,
