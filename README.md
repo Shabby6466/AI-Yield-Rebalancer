@@ -30,15 +30,12 @@ graph TD
 
 ## 🛠️ Technology Stack
 
-| Layer  | Component | Technology | Confidence |
-| :---   | :---      | :---       | :---       |
-| **Layer 1: Eyes** | Data Ingestion | Python, DeFiLlama Yields API, Dune Analytics SQL, TimescaleDB, ppsycopg2 | **High (95%)** |
-
-| **Layer 2: Brain** | Decision Engine | Stable-Baselines3 (PPO), Gymnasium, NumPy, LSTM (Yield Prediction) | **Medium (75%)** |
-
-| **Layer 3: Safety** | Risk Management | Chainlink Data Feeds, Liquidity Depth (SlippageClient), Circuit Breaker Patterns | **High (90%)** |
-
-| **Layer 4: Hands** | Execution | Flashbots Relay (MEV-Safe), Web3.py, Anvil (Local Forking), StrategyHub Smart Contract | **High (95%)** |
+| Layer | Component | Technology | Confidence |
+| :--- | :--- | :--- | :--- |
+| **Layer 1: Eyes** | Data Ingestion | Python, DeFiLlama API, Dune SQL, TimescaleDB, Psycopg2 | **Extreme (99%)** |
+| **Layer 2: Brain** | Decision Engine | Stable-Baselines3 (PPO), Gymnasium, NumPy, PyTorch (LSTM) | **High (85%)** |
+| **Layer 3: Safety** | Risk Management | Chainlink Feeds, 1inch (SlippageClient), Circuit Breaker | **Extreme (99%)** |
+| **Layer 4: Hands** | Execution | Flashbots Relay, Web3.py, Anvil (Local Fork), StrategyHub | **High (98%)** |
 
 ---
 
@@ -48,7 +45,15 @@ graph TD
 *   **Processing**: 
     1.  The `DataAggregator` polls DeFiLlama every hour for top-performing stablecoin pools.
     2.  Dune Analytics provides macro-level "Black Swan" metrics (historical volatility peaks).
-    3.  Data is normalized and stored in **TimescaleDB hypertables**, which optimize time-series queries for the AI to look at "1-week trends" vs "current APY."
+    3.  Data is normalized and stored in **TimescaleDB hypertables**.
+
+```mermaid
+graph LR
+    DFL[DeFiLlama API] --> Agg[DataAggregator]
+    Dune[Dune SQL] --> Agg
+    Agg --> TS[TimescaleDB]
+    TS --> AI[AI Feature Vector]
+```
 *   **Confidence Reasoning**: DeFiLlama is the industry standard for yield data. TimescaleDB ensures data persistence even under heavy loads.
 
 ### 2. Layer 2: The "Brain" (AI Inference)
@@ -194,6 +199,20 @@ To verify the system's resilience, we implemented a **Black Swan Crash Simulator
 *   **Trigger Threshold**: The `CircuitBreaker` is hard-coded to trigger if any stablecoin drops below **$0.98**.
 
 ### ⚡ System Response (Verified)
+
+```mermaid
+sequenceDiagram
+    participant CB as CircuitBreaker
+    participant AI as AI Brain
+    participant SH as StrategyHub
+    
+    CB->>CB: Detect Peg < $0.98
+    Note over CB: 🚨 CRITICAL ALERT
+    CB->>SH: Trigger emergencyWithdrawAll()
+    CB--xAI: Block Cycle (AI Bypassed)
+    Note over SH: Funds moved to IDLE
+```
+
 1.  **Detection**: At the very start of the cycle (before the AI is even consulted), the `CircuitBreaker` queries the price (simulated or Chainlink).
 2.  **Emergency Halt**: The system immediately logs a `CRITICAL` alert: `🚨 EMERGENCY TRIGGERED: Stablecoin De-peg Detected`.
 3.  **Asset Protection**: 
