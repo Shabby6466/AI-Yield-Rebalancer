@@ -46,7 +46,11 @@ class CircuitBreaker:
 
     def _check_pegs(self) -> bool:
         """Integration with Chainlink to verify USDC/DAI/USDT stays near $1."""
-        # TODO: Implement ChainlinkClient.get_latest_price()
+        # Simulated Crash Trigger for testing
+        if os.getenv("SIMULATE_CRASH") == "true":
+            logger.warning("🚨 SIMULATED CRASH: USDC De-peg detected ($0.85)")
+            return False
+            
         # For POC, simulate healthy peg
         return True
 

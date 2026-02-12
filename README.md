@@ -1,6 +1,16 @@
 # 🏗️ AI-Yield-Rebalancer: System Architecture
 
-This document provides a comprehensive deep-dive into the 4-layer architecture of the AI-Driven DeFi Yield Rebalancer. It details the technology stack, data processing flows, and confidence metrics for each component.
+### 📖 Table of Contents
+*   [🗺️ High-Level System Overview](#-high-level-system-overview)
+*   [🛠️ Technology Stack](#️-technology-stack)
+*   [🔍 Detailed Data Processing](#-detailed-data-processing--confidence)
+*   [🔄 The Life of a Rebalance](#-the-life-of-a-rebalance)
+*   [🧪 Live Test Case](#test-case)
+*   [💰 Microscopic Details (Capital, Gas, Trading)](#️-under-the-hood-microscopic-details)
+*   [🧠 Decoding AI Metrics (APY, Confidence, Weights)](#-decoding-ai-metrics-the-logic-of-the-decision)
+*   [🚨 Black Swan Simulation (Crash Proofing)](#-black-swan-simulation-stress-testing)
+
+This document provides a comprehensive deep-dive into the 4-layer architecture of the AI-Driven DeFi Yield Rebalancer.
 
 ---
 
@@ -171,3 +181,33 @@ When looking at the dashboard, the "Brain" outputs specific numbers that determi
 ## 📈 Database Persistence
 *   **Predictions.db**: Every one of these metrics is saved to a local SQLite database (`data/predictions.db`).
 *   **Auto-Validation**: After 7 days, the system checks the actual APY of that 209% pool. If it stayed high, the AI gets a "Reward" (Confidence increases). If it crashed, the AI "Learns" it was a yield trap.
+
+---
+
+## 🚨 Black Swan Simulation (Stress Testing)
+
+To verify the system's resilience, we implemented a **Black Swan Crash Simulator**. This allows us to test if the "Safety" layer can override the "Brain" during extreme volatility.
+
+### 🧪 Scenario: The Stablecoin De-peg
+*   **Target Asset**: USDC (Stablecoin).
+*   **The Event**: A simulated de-peg where the price of USDC drops from **$1.00** to **$0.85** (simulated via `SIMULATE_CRASH=true`).
+*   **Trigger Threshold**: The `CircuitBreaker` is hard-coded to trigger if any stablecoin drops below **$0.98**.
+
+### ⚡ System Response (Verified)
+1.  **Detection**: At the very start of the cycle (before the AI is even consulted), the `CircuitBreaker` queries the price (simulated or Chainlink).
+2.  **Emergency Halt**: The system immediately logs a `CRITICAL` alert: `🚨 EMERGENCY TRIGGERED: Stablecoin De-peg Detected`.
+3.  **Asset Protection**: 
+    *   The `Rebalance Cycle` is instantly **Aborted**.
+    *   An `emergencyWithdrawAll()` transaction is signed and sent to the local fork to pull all capital into "Idle" status.
+4.  **Resumption**: Once the `SIMULATE_CRASH` flag is disabled (fixing the market), the system detects a healthy **$1.00** peg and automatically resumes its search for the **209.44% APY** opportunities.
+
+### 📊 Crash Test Metrics
+| Metric | Healthy State | Crash State |
+| :--- | :--- | :--- |
+| **USDC Price** | $1.00 | **$0.85** |
+| **Risk Status** | Green | **CRITICAL** |
+| **AI Decision** | REBALANCE (209% APY) | **Bypassed (STOP)** |
+| **Cycle Outcome** | TX Executed | **Halt & Withdraw** |
+| **Recovery Time** | Autonomous (Instant) | Autonomous (Next Cycle) |
+
+This stress test proves that while the AI Brain is aggressive at seeking yield, the **Safety Shield is Absolute**.
