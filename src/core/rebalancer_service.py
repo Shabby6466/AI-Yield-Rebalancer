@@ -16,9 +16,12 @@ from src.data.chainlink_client import ChainlinkClient
 from src.data.timeseries_db import TimeseriesDB
 import numpy as np
 import random
-import os
 from datetime import datetime
 from dotenv import load_dotenv
+from decimal import Decimal, getcontext
+
+# Set precision to 18 decimal places matching blockchain standards
+getcontext().prec = 18
 
 # Configure logging to both console and file for dashboard tailing
 log_file = "data/rebalancer.log"
@@ -103,6 +106,20 @@ class RebalancerService:
         self.phase_logs = [] # Reset for new cycle
         logger.info("--- Starting Rebalancing Cycle ---")
         
+        # -1.5 Nonce Lock: Prevent Zombie Transactions
+        try:
+            # Check for any "in-flight" transactions by comparing latest vs pending nonces
+            on_chain_nonce = await asyncio.to_thread(self.w3.eth.get_transaction_count, self.signer.address, 'latest')
+            pending_nonce = await asyncio.to_thread(self.w3.eth.get_transaction_count, self.signer.address, 'pending')
+            
+            if pending_nonce > on_chain_nonce:
+                logger.warning(f"🚨 NONCE LOCK: {pending_nonce - on_chain_nonce} transaction(s) still pending. Aborting cycle to avoid zombie state.")
+                return
+            logger.debug(f"Nonce Sync: {on_chain_nonce} (No pending txs)")
+        except Exception as e:
+            logger.error(f"Nonce Lock Check failed: {e}")
+            return # Safety: Don't proceed if we can't verify transaction state
+        
         # -1. Auto-Validate Maturing Predictions
         try:
             val_results = await asyncio.to_thread(self.tracker.auto_validate_from_db)
@@ -186,11 +203,19 @@ class RebalancerService:
             logger.error(f"Wallet Check Failed: {e}")
             wallet_balance = 0.0
 
-        # Fetch Live ETH Price from Chainlink (Async/Threaded)
-        eth_price = await self.chainlink.get_asset_price('ETH')
+        # Fetch Live ETH Price from Chainlink (Async/Threaded) with Age Verification
+        eth_price_float, price_updated_at = await self.chainlink.get_asset_price('ETH')
+        eth_price = Decimal(str(eth_price_float))
+        
+        # Oracle Lag Safety (Issue 6)
+        lag_seconds = int(datetime.utcnow().timestamp()) - price_updated_at
+        if lag_seconds > 60:
+             logger.error(f"🚨 ORACLE LAG DETECTED: ETH Price is {lag_seconds}s stale (Max: 60s). Aborting cycle for safety.")
+             return
+
         # If wallet has balance, use it. Otherwise fallback to ENV for safety.
-        PORTFOLIO_SIZE = wallet_balance * eth_price if wallet_balance > 0.01 else float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
-        logger.info(f"DYNAMIC_CAPITAL: Scaling decisions based on ${PORTFOLIO_SIZE:,.2f} total assets (ETH @ ${eth_price:,.2f})")
+        PORTFOLIO_SIZE = Decimal(str(wallet_balance)) * eth_price if wallet_balance > 0.01 else Decimal(os.getenv("PORTFOLIO_SIZE_USD", "100000.0"))
+        logger.info(f"DYNAMIC_CAPITAL: Scaling decisions based on ${float(PORTFOLIO_SIZE):,.2f} total assets (ETH @ ${float(eth_price):,.2f})")
 
         # Enhanced ML Prediction Audit (Liquidity-Aware & Threaded)
         # 1. Look up the ACTUAL hex address from local DB (replaces UUID)
@@ -305,38 +330,41 @@ class RebalancerService:
         adjusted_current_apy = min(self.current_apy, 15.0) if self.current_apy > 50.0 else self.current_apy
         apy_gain = adjusted_target_apy - adjusted_current_apy
         
-        # Costs Logic
-        gas_price_gwei = self.w3.eth.gas_price / 1e9
-        tx_gas_limit = 500000
-        gas_cost_usd = (tx_gas_limit * gas_price_gwei * 1e-9) * eth_price
+        # Costs Logic (Precision with Decimal)
+        gas_price_gwei = Decimal(str(self.w3.eth.gas_price)) / Decimal("1e9")
+        tx_gas_limit = Decimal("500000")
+        gas_cost_usd = (tx_gas_limit * gas_price_gwei * Decimal("1e-9")) * eth_price
+        
         # Wrap slippage check in thread
-        estimated_slippage = await asyncio.to_thread(
-            self.slippage.get_expected_slippage_sync, "USDC", "USDT", PORTFOLIO_SIZE
+        estimated_slippage_float = await asyncio.to_thread(
+            self.slippage.get_expected_slippage_sync, "USDC", "USDT", float(PORTFOLIO_SIZE)
         )
+        estimated_slippage = Decimal(str(estimated_slippage_float))
+        
         total_costs_usd = gas_cost_usd + (PORTFOLIO_SIZE * estimated_slippage)
-        monthly_gain_usd = (PORTFOLIO_SIZE * (apy_gain / 100)) / 12
+        monthly_gain_usd = (PORTFOLIO_SIZE * (Decimal(str(apy_gain)) / Decimal("100"))) / Decimal("12")
         net_profit_usd = monthly_gain_usd - total_costs_usd
         
         # Calculate Break-Even
-        break_even_days = (total_costs_usd / (monthly_gain_usd / 30)) if monthly_gain_usd > 0 else float('inf')
+        break_even_days = (total_costs_usd / (monthly_gain_usd / Decimal("30"))) if monthly_gain_usd > 0 else Decimal('Infinity')
 
-        # Bundle Metrics for XAI
+        # Bundle Metrics for XAI (Convert to float for logging/DB compatibility)
         financial_metrics = {
-            "gas_cost_usd": gas_cost_usd,
-            "estimated_slippage": estimated_slippage,
-            "total_costs_usd": total_costs_usd,
-            "monthly_gain_usd": monthly_gain_usd,
-            "net_profit_usd": net_profit_usd,
-            "break_even_days": break_even_days,
+            "gas_cost_usd": float(gas_cost_usd),
+            "estimated_slippage": float(estimated_slippage),
+            "total_costs_usd": float(total_costs_usd),
+            "monthly_gain_usd": float(monthly_gain_usd),
+            "net_profit_usd": float(net_profit_usd),
+            "break_even_days": float(break_even_days) if monthly_gain_usd > 0 else 999.0,
             # Map to dashboard keys
-            "gas_exit": gas_cost_usd / 2, # Approximation
-            "gas_enter": gas_cost_usd / 2,
-            "swap_fees": PORTFOLIO_SIZE * estimated_slippage,
-            "total_conversion_loss": total_costs_usd,
-            "roi_days": break_even_days,
+            "gas_exit": float(gas_cost_usd / 2),
+            "gas_enter": float(gas_cost_usd / 2),
+            "swap_fees": float(PORTFOLIO_SIZE * estimated_slippage),
+            "total_conversion_loss": float(total_costs_usd),
+            "roi_days": float(break_even_days) if monthly_gain_usd > 0 else 999.0,
             # Wallet Tracking
-            "wallet_balance_eth": wallet_balance,
-            "eth_price": eth_price,
+            "wallet_balance_eth": float(wallet_balance),
+            "eth_price": float(eth_price),
             "last_updated": datetime.utcnow().isoformat()
         }
 
@@ -581,15 +609,28 @@ class RebalancerService:
                    hex(new_comp_bps)[2:].zfill(64)
 
         rebalance_tx = {
+            'from': self.signer.address,
             'to': os.getenv("STRATEGY_HUB_ADDRESS", "0x56d4d6aEe0278c5Df2FA23Ecb32eC146C9446FDf"),
             'value': 0,
             'data': calldata,
-            'gas': 500000,
-            'maxFeePerGas': int(self.w3.eth.gas_price * 1.5),
-            'maxPriorityFeePerGas': self.w3.to_wei(2, 'gwei'),
             'nonce': self.w3.eth.get_transaction_count(self.signer.address),
             'chainId': self.w3.eth.chain_id
         }
+
+        # Dynamic Gas Estimation (Issue 3 Implementation)
+        try:
+            # Estimate gas on-chain
+            estimated_gas = self.w3.eth.estimate_gas(rebalance_tx)
+            # Add 20% buffer for complex state changes
+            rebalance_tx['gas'] = int(estimated_gas * 1.2)
+            logger.info(f"   - Estimated Gas: {estimated_gas} (Limit set to {rebalance_tx['gas']} with 20% buffer)")
+        except Exception as e:
+            logger.warning(f"   - Gas Estimation failed: {e}. Falling back to 550,000.")
+            rebalance_tx['gas'] = 550000
+
+        # Add EIP-1559 Fees
+        rebalance_tx['maxFeePerGas'] = int(self.w3.eth.gas_price * 1.5)
+        rebalance_tx['maxPriorityFeePerGas'] = self.w3.to_wei(2, 'gwei')
         
         logger.info(f"   - Encoded StrategyHub.rebalance({new_aave_bps}, {new_comp_bps})")
         return [rebalance_tx]

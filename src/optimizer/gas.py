@@ -16,11 +16,11 @@ class GasOptimizer:
         self.w3_eth = Web3(Web3.HTTPProvider("https://cloudflare-eth.com"))
         self.w3_base = Web3(Web3.HTTPProvider("https://mainnet.base.org"))
         
-        # Gas Limits (Estimated)
+        # Gas Limits (Updated for complex DeFi interactions)
         self.limits = {
-            "transfer": 21000,
-            "swap": 200000,
-            "bridge": 150000
+            "transfer": 65000,
+            "swap": 550000, # Adjusted for nested StrategyHub logic
+            "bridge": 250000
         }
 
     def get_eth_price(self):
@@ -60,14 +60,23 @@ class GasOptimizer:
             base = 1.0 if chain == "ethereum" else 0.5
             return base * random.uniform(0.9, 1.1)
 
-    def calculate_swap_fee(self, amount_usd: float, is_stable_pair: bool = True) -> float:
+    def calculate_swap_fee(self, amount_usd: float, pool_tvl: float = 0.0, is_stable_pair: bool = True) -> float:
         """
-        Estimate DEX Swap Fee
+        Estimate DEX Swap Fee with Liquidity Penalty (Depth-Aware)
         - Stable-Stable (Curve/Uni v3 0.05%): 0.0005
         - Volatile (Uni v3 0.3%): 0.003
         """
         fee_rate = 0.0005 if is_stable_pair else 0.003
-        return amount_usd * fee_rate
+        base_fee = amount_usd * fee_rate
+
+        # --- NEW: Depth-Aware Slippage (Slippage increases with trade size/depth ratio) ---
+        if pool_tvl > 1.0: # Safeguard against div by zero
+            # Penalty increases exponentially as your trade size approaches the pool depth
+            slippage_impact = (amount_usd / pool_tvl) ** 2 
+            total_friction = base_fee + (amount_usd * slippage_impact)
+            return total_friction
+            
+        return base_fee
 
     def should_rebalance(self, 
                         current_apy: float, 

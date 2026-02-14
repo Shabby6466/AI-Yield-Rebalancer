@@ -54,11 +54,16 @@ class ProtocolFeatures:
     market_volatility: float  # VIX-like metric
     defi_tvl_dominance: float  # Protocol TVL / Total DeFi TVL
     
-    # Time Features (4)
-    day_of_week: int
-    hour_of_day: int
+    # Time Features (Cyclical Encoding)
+    hour_sin: float
+    hour_cos: float
+    day_sin: float
+    day_cos: float
     is_weekend: int
     days_since_epoch: int
+
+    # Utilization Sensitivity
+    utilization_kink_distance: float # Distance to 90% kink
     
     # Competitive Features (4)
     relative_apy_rank: int  # Rank among similar protocols
@@ -105,11 +110,16 @@ class ProtocolFeatures:
             self.market_volatility,
             self.defi_tvl_dominance,
             
-            # Time (4)
-            self.day_of_week,
-            self.hour_of_day,
+            # Time (6)
+            self.hour_sin,
+            self.hour_cos,
+            self.day_sin,
+            self.day_cos,
             self.is_weekend,
             self.days_since_epoch,
+            
+            # Utilization (1)
+            self.utilization_kink_distance,
             
             # Competitive (4)
             self.relative_apy_rank,
@@ -139,7 +149,9 @@ class ProtocolFeatures:
             # Market
             "gas_price", "log_eth_price", "market_volatility", "defi_tvl_dominance",
             # Time
-            "day_of_week", "hour_of_day", "is_weekend", "days_since_epoch",
+            "hour_sin", "hour_cos", "day_sin", "day_cos", "is_weekend", "days_since_epoch",
+            # Utilization
+            "utilization_kink_distance",
             # Competitive
             "apy_rank", "apy_vs_avg", "liquidity_vs_avg", "volume_vs_avg",
             # Historical
@@ -351,14 +363,27 @@ class FeatureEngineer:
         self,
         current_date: datetime,
     ) -> Dict[str, Any]:
-        """Compute time-based features"""
+        """Compute cyclical time features for ML models"""
+        hour = current_date.hour
+        day = current_date.weekday()
+        
+        # Sine/Cosine Encoding for Hour (24h cycle)
+        hour_sin = np.sin(2 * np.pi * hour / 24)
+        hour_cos = np.cos(2 * np.pi * hour / 24)
+        
+        # Sine/Cosine Encoding for Day (7d cycle)
+        day_sin = np.sin(2 * np.pi * day / 7)
+        day_cos = np.cos(2 * np.pi * day / 7)
+        
         epoch = datetime(2024, 1, 1)
         days_since_epoch = (current_date - epoch).days
         
         return {
-            "day_of_week": current_date.weekday(),
-            "hour_of_day": current_date.hour,
-            "is_weekend": 1 if current_date.weekday() >= 5 else 0,
+            "hour_sin": float(hour_sin),
+            "hour_cos": float(hour_cos),
+            "day_sin": float(day_sin),
+            "day_cos": float(day_cos),
+            "is_weekend": 1 if day >= 5 else 0,
             "days_since_epoch": days_since_epoch,
         }
     
@@ -414,7 +439,10 @@ class FeatureEngineer:
         asset: str,
         current_date: datetime,
     ) -> Dict[str, float]:
-        """Compute historical return metrics"""
+        """
+        Compute historical performance using Realized Cumulative Yield.
+        Accounts for time-weighted returns and compounding.
+        """
         query = """
         SELECT apy_percent, recorded_at
         FROM protocol_yields
@@ -425,7 +453,7 @@ class FeatureEngineer:
         ORDER BY recorded_at ASC
         """
         
-        start_date = current_date - timedelta(days=30)
+        start_date = current_date - timedelta(days=31) # Get extra day for pct_change/diff
         
         cursor = self.db.cursor()
         cursor.execute(query, (protocol_id, asset, start_date, current_date))
@@ -443,23 +471,31 @@ class FeatureEngineer:
         df = pd.DataFrame(rows, columns=["apy", "timestamp"])
         df = df.sort_values("timestamp")
         
-        # Simple ROI calculation (APY changes)
-        roi_7d = 0.0
-        roi_30d = 0.0
+        # 1. Convert Annualized APY to Daily Yield
+        # Formula: Daily_Yield = (1 + APY/100)^(1/365) - 1
+        df['daily_yield'] = (1 + df['apy'] / 100) ** (1/365) - 1
         
-        if len(df) >= 7:
-            roi_7d = df["apy"].iloc[-1] - df["apy"].iloc[-7]
-        if len(df) >= 30:
-            roi_30d = df["apy"].iloc[-1] - df["apy"].iloc[0]
+        # 2. Calculate Realized ROI (Cumulative Product)
+        # This represents: If I put $1 in 7 days ago, what is it worth now?
+        def get_realized_roi(days):
+            if len(df) < days: return 0.0
+            period_yields = df['daily_yield'].tail(days)
+            # Cumulative Return: ( (1+r1)*(1+r2)...*(1+rn) ) - 1
+            return (np.prod(1 + period_yields) - 1) * 100 # Express as %
+
+        roi_7d = get_realized_roi(7)
+        roi_30d = get_realized_roi(30)
         
-        # Sharpe ratio (return / volatility)
-        returns = df["apy"].pct_change().dropna()
-        if len(returns) > 0 and returns.std() > 0:
-            sharpe = returns.mean() / returns.std() * np.sqrt(365)  # Annualized
+        # 3. Corrected Sharpe Ratio
+        # Use daily yields for standard deviation instead of raw APY percentages
+        returns = df['daily_yield'].tail(30)
+        if len(returns) > 1 and returns.std() > 0:
+            # Sharpe = (Mean Daily / Std Daily) * sqrt(365)
+            sharpe = (returns.mean() / returns.std()) * np.sqrt(365)
         else:
             sharpe = 0.0
         
-        # Max drawdown
+        # 4. Max Drawdown (Calculated on APY as a proxy for yield health)
         cummax = df["apy"].cummax()
         drawdown = (df["apy"] - cummax) / cummax * 100
         max_drawdown = abs(drawdown.min()) if len(drawdown) > 0 else 0.0
@@ -498,6 +534,12 @@ class FeatureEngineer:
         risk_feats = self.compute_risk_features(protocol_id, current_date)
         market_feats = self.compute_market_features(current_date)
         time_feats = self.compute_time_features(current_date)
+        
+        # New: Utilization Kink Distance (Sensitivity to Supply Locks)
+        # Most protocols 'Kink' at 90% utilization
+        util = liquidity_feats.get("utilization_rate", 0.0)
+        util_kink_distance = max(0.0, 0.9 - util)
+        
         competitive_feats = self.compute_competitive_features(
             protocol_id, asset, yield_feats["current_apy"], current_date
         )
@@ -543,10 +585,15 @@ class FeatureEngineer:
             defi_tvl_dominance=market_feats["defi_tvl_dominance"],
             
             # Time
-            day_of_week=time_feats["day_of_week"],
-            hour_of_day=time_feats["hour_of_day"],
+            hour_sin=time_feats["hour_sin"],
+            hour_cos=time_feats["hour_cos"],
+            day_sin=time_feats["day_sin"],
+            day_cos=time_feats["day_cos"],
             is_weekend=time_feats["is_weekend"],
             days_since_epoch=time_feats["days_since_epoch"],
+            
+            # Utilization
+            utilization_kink_distance=util_kink_distance,
             
             # Competitive
             relative_apy_rank=competitive_feats["relative_apy_rank"],
