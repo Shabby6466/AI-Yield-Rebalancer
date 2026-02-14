@@ -271,6 +271,18 @@ class RebalancerService:
             logger.warning(f"Skipping pool {target_pool['symbol']} due to failed ML audit.")
             return
 
+        # 3.5 ML Audit for CURRENT pool to compare risks (Issue 3 Implementation)
+        current_ml_audit = None
+        if self.current_pool_id and self.current_pool_id != "none" and self.current_pool_id != "CASH":
+            curr_pool_addr = self.db.get_pool_address(self.current_pool_id)
+            if curr_pool_addr and curr_pool_addr.startswith('0x'):
+                current_ml_audit = await asyncio.to_thread(
+                    self.ml_service.generate_prediction,
+                    pool_address=curr_pool_addr,
+                    asset_symbol=self.current_pool_symbol,
+                    portfolio_size_usd=PORTFOLIO_SIZE
+                )
+
         # 4. Liquidity Concentration Check (Crucial for $2.9M+)
         # Ensure we don't own more than 5% of the pool to avoid toxic slippage
         pool_tvl = ml_audit.get('tvl', 0)
@@ -331,10 +343,24 @@ class RebalancerService:
 
         # ... (Phases 1-3 logic continues) ...
         # (We skip Lines 207-213 in replacement as they are preserved below, but we need to update financial_metrics later)
-        ml_predicted_apy = ml_audit.get('predicted_apy', target_apy)
-        adjusted_target_apy = min(ml_predicted_apy, 15.0) if ml_predicted_apy > 50.0 else ml_predicted_apy
-        adjusted_current_apy = min(self.current_apy, 15.0) if self.current_apy > 50.0 else self.current_apy
+        # 5. Yield Differential Logic (Predicted vs Predicted for Consistency)
+        ml_predicted_target_apy = ml_audit.get('predicted_apy', target_apy)
+        ml_predicted_current_apy = current_ml_audit.get('predicted_apy', self.current_apy) if current_ml_audit else self.current_apy
+        
+        # Apply Caps for Revisions
+        adjusted_target_apy = min(ml_predicted_target_apy, 15.0) if ml_predicted_target_apy > 50.0 else ml_predicted_target_apy
+        adjusted_current_apy = min(ml_predicted_current_apy, 15.0) if ml_predicted_current_apy > 50.0 else ml_predicted_current_apy
+        
         apy_gain = adjusted_target_apy - adjusted_current_apy
+        
+        # Risk Comparison (0-100 scale)
+        current_risk_score = current_ml_audit.get('risk_score', 50.0) if current_ml_audit else 50.0
+        target_risk_score = ml_audit.get('risk_score', 50.0)
+        risk_delta = current_risk_score - target_risk_score
+        
+        # Defensive Rule: Accept negative yield gap if risk reduction is significant
+        RISK_MITIGATION_THRESHOLD = 30.0
+        is_defensive_move = risk_delta > RISK_MITIGATION_THRESHOLD
         
         # Costs Logic (Precision with Decimal)
         gas_price_gwei = Decimal(str(self.w3.eth.gas_price)) / Decimal("1e9")
@@ -343,7 +369,7 @@ class RebalancerService:
         
         # Wrap slippage check in thread
         estimated_slippage_float = await asyncio.to_thread(
-            self.slippage.get_expected_slippage_sync, "USDC", "USDT", float(PORTFOLIO_SIZE)
+            self.slippage.get_expected_slippage_sync, self.current_pool_symbol, target_pool['symbol'], float(PORTFOLIO_SIZE)
         )
         estimated_slippage = Decimal(str(estimated_slippage_float))
         
@@ -375,20 +401,24 @@ class RebalancerService:
         }
 
         # Phase 1: The Opportunity Gap
-        p1_msg = f"🔍 Phase 1: Detecting Opportunity Gap...\n- Current: {self.current_pool_symbol} ({self.current_apy:.2f}% APY)\n- Target: {target_pool['symbol']} ({target_apy:.2f}% APY)\n- Gap: {apy_gain:.2f}% yield differential"
+        risk_msg = f" (Defense active: Risk reduction {risk_delta:.1f} pts)" if is_defensive_move else ""
+        p1_msg = f"🔍 Phase 1: Detecting Opportunity Gap...\n- Current: {self.current_pool_symbol} ({ml_predicted_current_apy:.2f}% Predicted APY)\n- Target: {target_pool['symbol']} ({ml_predicted_target_apy:.2f}% Predicted APY)\n- Gap: {apy_gain:.2f}% yield differential{risk_msg}"
         logger.info(p1_msg)
         self.phase_logs.append(p1_msg)
 
         # Phase 2: The Go/No-Go Decision
         # Projects a 14-day duration based on LSTM Trend
-        predicted_trend = "Trending Up" if ml_predicted_apy > target_apy else "Stable"
+        predicted_trend = "Trending Up" if ml_predicted_target_apy > target_apy else "Stable"
         p2_msg = f"📊 Phase 2: The Go/No-Go Decision (Trend: {predicted_trend})\n- Expected Monthly Gain: ${monthly_gain_usd:,.2f}\n- Total Friction Costs: ${total_costs_usd:,.2f}\n- Break-Even Point: {break_even_days:.1f} days"
         logger.info(p2_msg)
         self.phase_logs.append(p2_msg)
 
-        # Profitability Filter: Must be profitable in USD AND meet min gain threshold
+        # Profitability Filter: Must be profitable in USD OR satisfy defensive move
         MIN_GAIN_THRESHOLD = 0.75
-        if apy_gain < MIN_GAIN_THRESHOLD or net_profit_usd <= 0:
+        
+        is_profitable = (apy_gain >= MIN_GAIN_THRESHOLD and net_profit_usd > 0)
+        
+        if not is_profitable and not is_defensive_move:
             reason = f"Costs > Gain" if net_profit_usd <= 0 else f"Low Gain {apy_gain:.2f}% < {MIN_GAIN_THRESHOLD}%"
             logger.info(f"❌ Verdict: REJECTED ({reason}). Holding Position.")
             self.phase_logs.append(f"❌ Verdict: REJECTED ({reason}).")
@@ -397,6 +427,10 @@ class RebalancerService:
                                         target_pool=target_pool, safety_report=safety_report,
                                         ml_audit=ml_audit, metrics=financial_metrics)
             return
+
+        if is_defensive_move and apy_gain < 0:
+            logger.info(f"🛡️ DEFENSIVE MOVE: Proceeding with {apy_gain:.2f}% yield drop to reduce risk by {risk_delta:.1f} pts.")
+            self.phase_logs.append(f"🛡️ DEFENSIVE MOVE: Reducing risk by {risk_delta:.1f} pts.")
 
         logger.info(f"✅ Verdict: GO! Triggering Atomic Rebalance...")
         self.phase_logs.append("✅ Verdict: GO! Triggering Atomic Rebalance...")

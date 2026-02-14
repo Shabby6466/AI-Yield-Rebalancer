@@ -296,8 +296,18 @@ class RiskClassifier:
         if self.model is None:
             # Simulated risk for POC if model file is missing
             levels = ['low', 'medium', 'high']
-            choice = np.random.choice(levels, p=[0.7, 0.25, 0.05])
-            return choice, np.random.uniform(85, 99)
+            predicted_idx = np.random.choice([0, 1, 2], p=[0.7, 0.25, 0.05])
+            risk_level = levels[predicted_idx]
+            
+            # Simulated probabilities for weighted score
+            probs = np.zeros(3)
+            probs[predicted_idx] = 0.8
+            remaining = (1.0 - 0.8) / 2
+            for i in range(3):
+                if i != predicted_idx: probs[i] = remaining
+                
+            risk_score = float(probs[0] * 15 + probs[1] * 50 + probs[2] * 85)
+            return risk_level, np.random.uniform(85, 99), risk_score
 
         try:
             # Scale features
@@ -316,6 +326,10 @@ class RiskClassifier:
             predicted_class = int(np.argmax(probs))
             confidence = float(probs[predicted_class]) * 100
             
+            # Continuous Risk Score (0-100): Weighted average of probabilities
+            # Low=15, Medium=50, High=85
+            risk_score = float(probs[0] * 15 + probs[1] * 50 + probs[2] * 85)
+            
             # Map to risk level
             if self.label_encoder is not None:
                 risk_level = self.label_encoder.inverse_transform([predicted_class])[0]
@@ -323,8 +337,8 @@ class RiskClassifier:
                 risk_levels = ['low', 'medium', 'high']
                 risk_level = risk_levels[min(predicted_class, 2)]
             
-            logger.info(f"Risk prediction: {risk_level} (confidence: {confidence:.2f}%)")
-            return risk_level, confidence
+            logger.info(f"Risk prediction: {risk_level} (score: {risk_score:.1f}, confidence: {confidence:.2f}%)")
+            return risk_level, confidence, risk_score
             
         except Exception as e:
             logger.error(f"Risk prediction failed: {e}")
@@ -732,17 +746,19 @@ class MLPredictionService:
         ])
         
         # Predict risk
-        risk_level, confidence = self.risk_classifier.predict_risk_score(risk_features)
+        risk_level, confidence, risk_score = self.risk_classifier.predict_risk_score(risk_features)
         
         # Safety Trigger: Override if liquidity is toxic
         if liquidity_is_toxic:
             logger.warning(f"⚠️ LIQUIDITY DEPTH WARNING: Portfolio (${portfolio_size_usd:,.0f}) is > 1% of TVL (${tvl:,.0f}). Aborting move.")
             risk_level = "high"
+            risk_score = 95.0
             confidence = 99.9
         
         prediction = {
             'predicted_apy': round(predicted_apy, 4),
             'risk_level': risk_level,
+            'risk_score': round(risk_score, 2),
             'confidence': round(confidence, 2),
             'timestamp': datetime.now().isoformat(),
             'pool_address': pool_address,

@@ -18,45 +18,52 @@ class SlippageClient:
 
     def get_expected_slippage_sync(self, from_token: str, to_token: str, amount_usd: float) -> float:
         """Synchronous wrapper for slippage estimation"""
-        if not self.api_key:
-            return self._simulate_slippage(amount_usd)
-        return 0.0005 # Placeholder for sync call
+        return self._simulate_slippage(from_token, to_token, amount_usd)
 
     async def get_expected_slippage(self, 
                                    from_token: str, 
                                    to_token: str, 
                                    amount_usd: float) -> float:
         """
-        Estimate the price impact for a swap.
-        
-        Returns:
-            Slippage as a percentage (e.g., 0.001 = 0.1%)
+        Estimate the price impact for a swap using directional liquidity heuristics.
         """
         if not self.api_key:
-            # Fallback to a simulation if no API key is provided
-            return self._simulate_slippage(amount_usd)
+            return self._simulate_slippage(from_token, to_token, amount_usd)
             
         try:
-            # Real 1inch API call (simplified)
-            # headers = {"Authorization": f"Bearer {self.api_key}"}
-            # params = {"fromTokenAddress": from_token, ...}
-            # async with httpx.AsyncClient() as client:
-            #     resp = await client.get(f"{self.one_inch_url}/{self.chain_id}/quote", params=params, headers=headers)
-            #     return resp.json().get('priceImpact', 0)
-            
-            logger.info(f"Checking slippage via 1inch for ${amount_usd}...")
-            return 0.0005 # Default 0.05% for stablecoins
+            logger.info(f"Checking slippage {from_token}->{to_token} for ${amount_usd:,.0f}...")
+            # For POC with API key, we'd call 1inch here. 
+            return self._simulate_slippage(from_token, to_token, amount_usd)
         except Exception as e:
             logger.error(f"Error fetching real-world slippage: {e}")
-            return self._simulate_slippage(amount_usd)
+            return self._simulate_slippage(from_token, to_token, amount_usd)
 
-    def _simulate_slippage(self, amount_usd: float) -> float:
+    def _simulate_slippage(self, from_token: str, to_token: str, amount_usd: float) -> float:
         """
-        Heuristic: Larger trades in DeFi cause higher price impact.
-        For stablecoins, impact is low but not zero.
+        Directional Price Impact Model.
+        Liquidity varies by token, and impact increases exponentially with trade size.
         """
-        # Linear approximation: 0.1% per $1M trade size
-        return (amount_usd / 1_000_000) * 0.001
+        # Virtual "Liquidity Depth" per token (for POC simulation)
+        depth_map = {
+            'USDC': 250_000_000, # Deep
+            'USDT': 200_000_000,
+            'DAI': 100_000_000,
+            'USP': 15_000_000,   # Thin
+            'SUSDE': 40_000_000,
+            'USDS': 30_000_000
+        }
+        
+        from_d = depth_map.get(from_token.upper(), 10_000_000)
+        to_d = depth_map.get(to_token.upper(), 10_000_000)
+        
+        # Square-root impact logic (standard in HFT/institutional modeling)
+        # Impact = 0.5 * (amount / depth)^2 [Simplified]
+        from_impact = (amount_usd / from_d) ** 2
+        to_impact = (amount_usd / to_d) ** 2
+        
+        total_impact = from_impact + to_impact
+        # Floor at 0.05% for standard DEX fees
+        return max(0.0005, total_impact)
 
     def is_safe_to_rebalance(self, slippage: float, threshold: float = 0.005) -> bool:
         """
