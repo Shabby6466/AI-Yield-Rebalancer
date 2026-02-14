@@ -502,19 +502,19 @@ class MLPredictionService:
         # Expand 4 base features -> 32 dimensions
         return self.expand_features(base_np)
 
-    def generate_prediction(self, pool_address: str, asset_identifier: str, portfolio_size_usd: float = 750000.0) -> Dict:
+    def generate_prediction(self, pool_address: str, asset_address: str, portfolio_size_usd: float = 750000.0) -> Dict:
         """Generate ML prediction with hex-safe identifiers and corrected SQL"""
         
         # 1. Resolve Symbol to Hex Address
-        asset_address = self.VERIFIED_ADDRESSES.get(asset_identifier.upper(), asset_identifier)
+        resolved_address = self.VERIFIED_ADDRESSES.get(asset_address.upper(), asset_address)
         
         # 2. Safety Check: Ensure we have a hex string now
-        if not asset_address.startswith('0x'):
-            logger.error(f"Invalid asset identifier: {asset_identifier}. Cannot generate prediction.")
+        if not resolved_address.startswith('0x'):
+            logger.error(f"Invalid asset identifier: {asset_address}. Cannot generate prediction.")
             return {}
 
         # Fetch real-time features
-        features = self.get_pool_features(pool_address, asset_address)
+        features = self.get_pool_features(pool_address, resolved_address)
         if not features: return {}
 
         # 3. Fix the Database Query
@@ -532,7 +532,7 @@ class MLPredictionService:
                         ORDER BY py.recorded_at DESC LIMIT 14
                     """
                     # The fix: Ensure exactly 3 variables match the 3 %s placeholders
-                    params = (asset_identifier, pool_address, pool_address)
+                    params = (asset_address, pool_address, pool_address)
                     cur.execute(query, params)
                     
                     rows = cur.fetchall()
