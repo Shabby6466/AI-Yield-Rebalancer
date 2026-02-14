@@ -60,9 +60,15 @@ services:
       bash -c "
         echo '🚢 Phase 1: Deploying Smart Contracts...' &&
         python3 scripts/start_local_fork.py &&
-        echo '🧠 Phase 2: Starting AI Rebalancer loop...' &&
+        echo '📊 Phase 1.5: Seeding Database...' &&
+        python3 src/scheduler/collector.py --once &&
+        echo '🧠 Phase 2: Starting AI Server & Rebalancer Loop...' &&
         export PYTHONPATH=/app &&
-        python3 src/scheduler/rebalancer_loop.py
+        # Start API Server in background
+        uvicorn src.api.server:app --host 0.0.0.0 --port 8000 &
+        # Start Rebalancer Loop in background
+        python3 src.scheduler.rebalancer_loop.py &
+        wait
       "
 
   # 4. Analytics Front-end (Streamlit Dashboard)

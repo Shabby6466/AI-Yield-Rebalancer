@@ -132,15 +132,20 @@ class YieldCollector:
 
     async def run_once(self):
         """Run a single collection cycle"""
-        stats = self.db.get_stats()
+        try:
+            # Check DB stats
+            # Use raw SQL because get_stats might return 0 if tables exist but are empty
+            stats = self.db.get_stats()
+            
+            # If DB is empty, do a backfill first
+            if stats['total_records'] == 0:
+                logger.info("Empty database detected. Running initial backfill...")
+                await self.backfill_top_pools(limit=20)
 
-        # If DB is empty, do a backfill first
-        if stats['total_records'] == 0:
-            logger.info("Empty database detected. Running initial backfill...")
-            await self.backfill_top_pools(limit=20)
-
-        # Then collect current snapshot
-        await self.collect_current()
+            # Then collect current snapshot
+            await self.collect_current()
+        except Exception as e:
+            logger.error(f"Single run failed: {e}")
 
         # Print stats
         stats = self.db.get_stats()
