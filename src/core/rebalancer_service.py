@@ -214,10 +214,15 @@ class RebalancerService:
              # Generically assume Aave if it's the top USDC pool and we have no better info
              pool_address = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2'
              
+        # 3. Resolve Asset Token Address (0x hex) specifically for the audit
+        underlying = target_pool.get('underlyingTokens', [])
+        asset_token_address = underlying[0] if underlying else None
+        
         ml_audit = await asyncio.to_thread(
             self.ml_service.generate_prediction,
             pool_address=pool_address, 
-            asset_address=symbol,
+            asset_symbol=symbol,
+            asset_address=asset_token_address,
             portfolio_size_usd=PORTFOLIO_SIZE
         )
         if not ml_audit or not ml_audit.get('success', False):

@@ -365,7 +365,13 @@ class MLPredictionService:
         # Yield-bearing "i" tokens (Instadapp/Lite)
         'IDAI': '0x611CC53503d97Dc9080c98f86f78716A803dB3f7',
         'IUSDC': '0x3274576510Cd38CB54B647185C01306C94339Be9',
-        'IUSDT': '0x3B68EF230a17409f583152Cd08064F250B39fEed'
+        'IUSDT': '0x3B68EF230a17409f583152Cd08064F250B39fEed',
+        # Additional Common Stablecoins
+        'FRAX': '0x853d955aCEf822Db058eb8505911ED77F175b99e',
+        'MUSD': '0xe2f2a5C287993345a840Db3B0845fbC70f5935a5',
+        'GHO': '0x40D16FC0246AD3160CCC09B8D0D3A2CD28AE6C2f',
+        'LUSD': '0x5f98805a4e8be255a32880fdec7f6728c6568ba0',
+        'PYUSD': '0x6c3ea9036406852006290770BEdFcAbA0e23A0e8'
     }
 
     def get_pool_features(self, pool_address: str, asset_address: str) -> Dict:
@@ -522,47 +528,76 @@ class MLPredictionService:
         return self.expand_features(base_np)
     def resolve_asset_address(self, identifier: str) -> Optional[str]:
         """
-        Advanced resolver that handles pairs and protocol prefixes.
+        Advanced fuzzy resolver that handles pairs, protocol prefixes (Aave, Compound, Instadapp, Yearn, Pendle, etc.),
+        and nested identifiers.
         Example: 'IDAI-IUSDC-IUSDT' -> 'IDAI' -> 'DAI' -> 0x6B17...
+        Example: 'PMUSD-FRXUSD' -> 'PMUSD' -> 'MUSD' -> 0xe2f2... (mStable)
         """
-        # 1. Take the first asset in a pair
-        primary = identifier.split('-')[0].upper()
+        if not identifier:
+            return None
+            
+        # 1. Standardize and Split
+        # Handle complex symbols like PMUSD-FRXUSD or PMUSD/FRXUSD
+        parts = identifier.replace('/', '-').split('-')
         
-        # 2. List of common protocol prefixes to strip (ordered by length)
-        prefixes = ['ST', 'W', 'A', 'C', 'I', 'Y']
+        # 2. Common protocol prefixes to strip (ordered to avoid greedy matching)
+        # Added: P (Pendle), S (sToken/Ethena), G (Gho), ST (Staked), FRX (Frax)
+        prefixes = ['ST', 'W', 'A', 'C', 'I', 'Y', 'P', 'S', 'G', 'FRX']
         
-        clean_symbol = primary
-        for pref in prefixes:
-            # Only strip if it leaves a valid symbol (e.g., don't strip 'A' from 'AAVE')
-            if primary.startswith(pref) and len(primary) > len(pref):
-                potential_match = primary[len(pref):]
-                if potential_match in self.VERIFIED_ADDRESSES:
-                    clean_symbol = potential_match
-                    logger.info(f"Resolved {identifier} -> {clean_symbol}")
-                    break
-                    
-        return self.VERIFIED_ADDRESSES.get(clean_symbol)
+        for part in parts:
+            candidate = part.upper()
+            
+            # Step A: Direct Check
+            if candidate in self.VERIFIED_ADDRESSES:
+                return self.VERIFIED_ADDRESSES[candidate]
+                
+            # Step B: Recursive Prefix Stripping
+            temp = candidate
+            changed = True
+            while changed:
+                changed = False
+                for pref in prefixes:
+                    # Strip prefix if it leaves a valid symbol (not just "A" from "AAVE")
+                    if temp.startswith(pref) and len(temp) > len(pref):
+                        temp = temp[len(pref):]
+                        if temp in self.VERIFIED_ADDRESSES:
+                            logger.info(f"Fuzzy Resolved: {identifier} -> {temp} ({self.VERIFIED_ADDRESSES[temp]})")
+                            return self.VERIFIED_ADDRESSES[temp]
+                        changed = True
+                        break
+            
+            # Step C: Partial Match Check (Base Asset Search)
+            # If "USDC" or "USDT" is inside the name, use that as the reference decimal base
+            for base in ['USDC', 'USDT', 'DAI', 'FRAX', 'USD']:
+                if base in candidate:
+                    # Map 'USD' to 'USDC' for hex address safety if no better match
+                    key = 'USDC' if base == 'USD' else base
+                    if key in self.VERIFIED_ADDRESSES:
+                        logger.info(f"Base Fallback: {identifier} contains {base} -> Using {key} address")
+                        return self.VERIFIED_ADDRESSES[key]
+                        
+        return None
 
-    def generate_prediction(self, pool_address: str, asset_address: str, portfolio_size_usd: float = 750000.0) -> Dict:
+    def generate_prediction(self, pool_address: str, asset_symbol: str, portfolio_size_usd: float = 750000.0, asset_address: str = None) -> Dict:
         """Generate ML prediction with hex-safe identifiers and corrected SQL"""
         
-        # 1. Resolve Symbol to Hex Address
-        resolved_address = self.resolve_asset_address(asset_address)
+        # 1. Resolve Symbol to Hex Address (if not already provided)
+        resolved_address = asset_address if asset_address else self.resolve_asset_address(asset_symbol)
         
         if not resolved_address:
             # Fallback: check if the identifier itself is a hex address
-            if asset_address.startswith('0x'):
-                resolved_address = asset_address
+            if asset_symbol.startswith('0x'):
+                resolved_address = asset_symbol
             else:
-                primary_asset = asset_address.split('-')[0].upper()
-                logger.error(f"⚠️ Resolution Failed: {asset_address} (Primary: {primary_asset}) not in Verified Map.")
+                primary_asset = asset_symbol.split('-')[0].upper()
+                logger.error(f"⚠️ Resolution Failed: {asset_symbol} (Primary: {primary_asset}) not in Verified Map.")
                 return {
                     'predicted_apy': 0.0,
                     'risk_level': 'high',
                     'confidence': 0.0,
                     'timestamp': datetime.now().isoformat(),
                     'pool_address': pool_address,
-                    'asset_address': asset_address,
+                    'asset_address': asset_symbol,
                     'network': self.network,
                     'liquidity_toxic': True,
                     'success': False
@@ -577,7 +612,7 @@ class MLPredictionService:
                 'confidence': 0.0,
                 'timestamp': datetime.now().isoformat(),
                 'pool_address': pool_address,
-                'asset_address': asset_address,
+                'asset_address': asset_symbol,
                 'network': self.network,
                 'liquidity_toxic': True,
                 'success': False
@@ -598,7 +633,7 @@ class MLPredictionService:
                         ORDER BY py.recorded_at DESC LIMIT 14
                     """
                     # The fix: Ensure exactly 3 variables match the 3 %s placeholders
-                    params = (asset_address, pool_address, pool_address)
+                    params = (asset_symbol, pool_address, pool_address)
                     cur.execute(query, params)
                     
                     rows = cur.fetchall()
