@@ -56,20 +56,27 @@ services:
       - ./data:/app/data
       - ./contracts:/app/contracts
       - ./models:/app/models
-    command: >
+    command: |
       bash -c "
-        export PYTHONPATH=/app &&
-        echo '🚢 Phase 1: Deploying Smart Contracts...' &&
-        python3 scripts/start_local_fork.py &&
-        echo '📊 Phase 1.5: Seeding Database...' &&
-        python3 src/scheduler/collector.py --once &&
-        echo '🧠 Phase 2: Starting Full AI Stack (Server + Agent + Collector)...' &&
-        # 1. Start API Server (Background)
+        export PYTHONPATH=/app
+        
+        # 1. Start API Server IMMEDIATELY (Background)
         uvicorn src.api.server:app --host 0.0.0.0 --port 8000 &
+        
+        echo '🚢 Phase 1: Deploying Smart Contracts...'
+        python3 scripts/start_local_fork.py
+        
+        echo '📊 Phase 1.5: Seeding Database...'
+        python3 src/scheduler/collector.py --once
+        
+        echo '🧠 Phase 2: Starting Agents...'
         # 2. Start Data Collector Loop (Background)
         python3 src/scheduler/collector.py &
+        
         # 3. Start Rebalancer Agent Loop (Background)
         python3 src/scheduler/rebalancer_loop.py &
+        
+        # Keep container alive
         wait
       "
 
