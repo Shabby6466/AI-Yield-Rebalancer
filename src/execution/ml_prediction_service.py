@@ -90,7 +90,7 @@ class DatabaseLogger:
                 """, (
                     prediction.get('network', 'sepolia'),
                     prediction['pool_address'],
-                    prediction['asset_address'],
+                    prediction.get('asset_address') or '0x0000000000000000000000000000000000000000',
                     prediction.get('protocol_name', 'Unknown'),
                     prediction['predicted_apy'],
                     prediction['risk_level'],
@@ -771,7 +771,7 @@ class MLPredictionService:
             'confidence': round(confidence, 2),
             'timestamp': datetime.now().isoformat(),
             'pool_address': pool_address,
-            'asset_address': asset_address,
+            'asset_address': resolved_address,
             'network': self.network,
             'liquidity_toxic': liquidity_is_toxic,
             'success': True

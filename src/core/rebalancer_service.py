@@ -243,19 +243,10 @@ class RebalancerService:
         underlying = target_pool.get('underlyingTokens', [])
         asset_token_address = underlying[0] if underlying else None
         
-        ml_audit = await asyncio.to_thread(
-            self.ml_service.generate_prediction,
-            pool_address=pool_address, 
-            asset_symbol=symbol,
-            asset_address=asset_token_address,
-            portfolio_size_usd=PORTFOLIO_SIZE
-        )
-        if not ml_audit or not ml_audit.get('success', False):
-            logger.warning(f"Skipping pool {target_pool['symbol']} due to failed ML audit.")
-            return
-
-        # 3.5 ML Audit for CURRENT pool to compare risks (Issue 3 Implementation)
+        # --- NEW: Institutional Safety (Emergency Audit CURRENT pool first) ---
         current_ml_audit = None
+        is_liquidity_emergency = False
+        
         if self.current_pool_id and self.current_pool_id != "none" and self.current_pool_id != "CASH":
             curr_pool_addr = self._resolve_pool_address(self.current_pool_id, self.current_pool_symbol, "")
             if curr_pool_addr and curr_pool_addr.startswith('0x'):
@@ -265,15 +256,49 @@ class RebalancerService:
                     asset_symbol=self.current_pool_symbol,
                     portfolio_size_usd=PORTFOLIO_SIZE
                 )
+                
+                if current_ml_audit:
+                    curr_tvl = Decimal(str(current_ml_audit.get('tvl', 0)))
+                    # Hard Exit Rule: If TVL < 2x Portfolio, we are trapped. 
+                    if curr_tvl < (Decimal("2.0") * PORTFOLIO_SIZE):
+                        logger.error(f"🚨 ILLIQUIDITY PANIC: Current Pool {self.current_pool_symbol} TVL (${float(curr_tvl):,.0f}) < 2x Portfolio Size!")
+                        is_liquidity_emergency = True
+
+        # --- Lifeboat Protocol: Blacklist current pool if it's a trap ---
+        if is_liquidity_emergency:
+            logger.info(f"Lifeboat Protocol: Blacklisting {self.current_pool_symbol} for this cycle. Searching for safe harbor...")
+            # Filter out the trapped pool and re-pick the best alternative
+            available_indices = [i for i, p in enumerate(self.last_scanned_pools) if p['pool'] != self.current_pool_id]
+            if available_indices:
+                # Re-calculate top weights among non-trapped pools
+                top_idx = available_indices[np.argmax(weights[available_indices])]
+                target_pool = self.last_scanned_pools[top_idx]
+                target_pool_id = target_pool['pool']
+                
+                # Re-pick symbol/project for the new target
+                symbol = target_pool.get('symbol', 'USDC').upper()
+                project = target_pool.get('project', '').lower()
+                pool_address = self._resolve_pool_address(target_pool['pool'], symbol, project)
+                
+                # Update underlying for the new target audit
+                underlying = target_pool.get('underlyingTokens', [])
+                asset_token_address = underlying[0] if underlying else None
+                logger.info(f"Target Redirected to: {target_pool['symbol']} (Conviction: {weights[top_idx]:.1%})")
+            else:
+                logger.warning("🚨 EMERGENCY FAILSAFE: No alternative pools found. Capital at risk.")
+
+        # 3. ML Audit for the (potentially new) TARGET pool
+        ml_audit = await asyncio.to_thread(
+            self.ml_service.generate_prediction,
+            pool_address=pool_address, 
+            asset_symbol=symbol,
+            asset_address=asset_token_address,
+            portfolio_size_usd=PORTFOLIO_SIZE
+        )
         
-        # 3.7 Liquidity Panic Check (Ghost TVL Blind Spot)
-        is_liquidity_emergency = False
-        if current_ml_audit:
-            curr_tvl = Decimal(str(current_ml_audit.get('tvl', 0)))
-            # Hard Exit Rule: If TVL < 2x Portfolio, we are trapped. EXIT NOW.
-            if curr_tvl < (Decimal("2.0") * PORTFOLIO_SIZE) and self.current_pool_id != "CASH":
-                logger.error(f"🚨 ILLIQUIDITY PANIC: Current Pool {self.current_pool_symbol} TVL (${float(curr_tvl):,.0f}) < 2x Portfolio Size!")
-                is_liquidity_emergency = True
+        if not ml_audit or not ml_audit.get('success', False):
+            logger.warning(f"Skipping pool {target_pool['symbol']} due to failed ML audit.")
+            return
 
         # 4. Liquidity Concentration Check (Crucial for $2.9M+)
         # Ensure we don't own more than 5% of the pool to avoid toxic slippage
@@ -325,7 +350,7 @@ class RebalancerService:
             "last_updated": datetime.utcnow().isoformat()
         }
 
-        if target_pool_id == self.current_pool_id and weights[top_idx] > 0.8:
+        if target_pool_id == self.current_pool_id and weights[top_idx] > 0.8 and not is_liquidity_emergency:
             logger.info(f"HOLD: Current position {target_pool['symbol']} remains optimal.")
             await self._record_cycle_prediction(weights, latest_features, forced_type="HOLD", 
                                         forced_reason=f"[HOLD_OPTIMAL] Already in {target_pool['symbol']}",
