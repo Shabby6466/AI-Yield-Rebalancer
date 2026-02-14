@@ -180,6 +180,13 @@ class RebalancerService:
         # Prepare Context & Calculations first (Moved up/duplicated for early return)
         PORTFOLIO_SIZE = float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
         
+        # Live Wallet Tracking
+        try:
+            raw_bal = self.w3.eth.get_balance(self.account.address)
+            wallet_balance = float(self.w3.from_wei(raw_bal, 'ether'))
+        except Exception:
+            wallet_balance = 0.0
+
         # Determine metrics even if holding
         # If holding identical pool, costs are technically zero relative to staying
         zero_metrics = {
@@ -193,7 +200,10 @@ class RebalancerService:
             "gas_enter": 0.0,
             "swap_fees": 0.0,
             "total_conversion_loss": 0.0,
-            "roi_days": 0.0
+            "roi_days": 0.0,
+            # Wallet Tracking
+            "wallet_balance_eth": wallet_balance,
+            "last_updated": datetime.utcnow().isoformat()
         }
 
         if target_pool_id == self.current_pool_id and weights[top_idx] > 0.8:
@@ -204,8 +214,8 @@ class RebalancerService:
                                         metrics=zero_metrics) # Pass zero metrics!
             return
 
-        # Prepare Context & Calculations for Phases
-        PORTFOLIO_SIZE = float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
+        # ... (Phases 1-3 logic continues) ...
+        # (We skip Lines 207-213 in replacement as they are preserved below, but we need to update financial_metrics later)
         ml_predicted_apy = ml_audit.get('predicted_apy', target_apy)
         adjusted_target_apy = min(ml_predicted_apy, 15.0) if ml_predicted_apy > 50.0 else ml_predicted_apy
         adjusted_current_apy = min(self.current_apy, 15.0) if self.current_apy > 50.0 else self.current_apy
@@ -236,7 +246,10 @@ class RebalancerService:
             "gas_enter": gas_cost_usd / 2,
             "swap_fees": PORTFOLIO_SIZE * estimated_slippage,
             "total_conversion_loss": total_costs_usd,
-            "roi_days": break_even_days
+            "roi_days": break_even_days,
+            # Wallet Tracking
+            "wallet_balance_eth": wallet_balance,
+            "last_updated": datetime.utcnow().isoformat()
         }
 
         # Phase 1: The Opportunity Gap

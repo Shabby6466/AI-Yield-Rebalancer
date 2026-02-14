@@ -33,6 +33,44 @@ try:
 except:
     st.sidebar.error(f"Brain Offline (Is server.py running?)")
 
+# --- Wallet Status Section ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("🤖 Agent Wallet")
+
+try:
+    # Connect to DB to get latest state
+    tracker = PredictionTracker()
+    latest_preds = tracker.get_all_predictions(limit=1)
+    
+    if latest_preds:
+        latest = latest_preds[0]
+        ctx = json.loads(latest['market_context']) if latest.get('market_context') else {}
+        metrics = ctx.get('metrics', {})
+        
+        # 1. Balance
+        # Default to 0 if not yet recorded in latest cycle
+        balance = metrics.get('wallet_balance_eth', 0.0)
+        st.sidebar.metric("ETH Balance", f"{balance:.4f} ETH")
+        
+        # 2. Current Position
+        current_pool = latest.get('current_pool_id', 'Unknown')
+        # Try to get symbol if available
+        if ctx.get('current_pool_symbol'):
+            current_pool = ctx['current_pool_symbol']
+            
+        st.sidebar.metric("Active Strategy", current_pool)
+        
+        # 3. Last Heartbeat
+        last_time = latest.get('timestamp', '').split('T')[-1][:5]
+        st.sidebar.caption(f"Last Update: {last_time} UTC")
+        
+    else:
+        st.sidebar.warning("No Agent History Found")
+        
+except Exception as e:
+    st.sidebar.error(f"Wallet Error: {str(e)}")
+st.sidebar.markdown("---")
+
 # --- Test Portfolio Section ---
 st.markdown("###  Active Test Portfolio")
 
