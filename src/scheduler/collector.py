@@ -74,35 +74,49 @@ class YieldCollector:
             with psycopg2.connect(self.db_url) as conn:
                 with conn.cursor() as cur:
                     for pool in pools:
-                        project = pool.get('project', pool.get('protocol', 'Unknown'))
-                        # Try to find protocol
-                        cur.execute("SELECT id FROM protocols WHERE name ILIKE %s LIMIT 1", (f"%{project}%",))
+                        project_id_name = pool.get('project', pool.get('protocol', 'Unknown'))
+                        # Normalize name for matching
+                        display_name = project_id_name.replace('-', ' ').title()
+                        
+                        # Try to find protocol, or create if missing
+                        cur.execute("SELECT id FROM protocols WHERE name ILIKE %s OR symbol ILIKE %s LIMIT 1", 
+                                    (f"%{project_id_name}%", f"%{project_id_name}%"))
                         res = cur.fetchone()
                         
-                        if res:
-                            protocol_id = res[0]
-                            ts = pool.get('timestamp')
-                            if ts:
-                                recorded_at = datetime.fromtimestamp(ts) if isinstance(ts, (int, float)) else ts
-                            else:
-                                recorded_at = datetime.utcnow()
-
+                        if not res:
+                            # Auto-create missing protocol
                             cur.execute("""
-                                INSERT INTO protocol_yields 
-                                (protocol_id, asset, apy_percent, total_liquidity_usd, available_liquidity_usd, tvl_usd, recorded_at)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                ON CONFLICT (protocol_id, asset, recorded_at) DO UPDATE SET
-                                apy_percent = EXCLUDED.apy_percent,
-                                tvl_usd = EXCLUDED.tvl_usd
-                            """, (
-                                protocol_id,
-                                pool.get('symbol', 'unknown'),
-                                float(pool.get('apy', 0)),
-                                float(pool.get('tvlUsd', 0)),
-                                float(pool.get('tvlUsd', 0)),
-                                float(pool.get('tvlUsd', 0)),
-                                recorded_at
-                            ))
+                                INSERT INTO protocols (name, symbol, chain, address, protocol_type)
+                                VALUES (%s, %s, %s, %s, %s)
+                                RETURNING id
+                            """, (display_name, project_id_name.upper()[:10], pool.get('chain', 'ethereum'), '0x0', 'vault'))
+                            protocol_id = cur.fetchone()[0]
+                            logger.info(f"➕ Created missing protocol entry for: {display_name}")
+                        else:
+                            protocol_id = res[0]
+
+                        ts = pool.get('timestamp')
+                        if ts:
+                            recorded_at = datetime.fromtimestamp(ts) if isinstance(ts, (int, float)) else ts
+                        else:
+                            recorded_at = datetime.utcnow()
+
+                        cur.execute("""
+                            INSERT INTO protocol_yields 
+                            (protocol_id, asset, apy_percent, total_liquidity_usd, available_liquidity_usd, tvl_usd, recorded_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (protocol_id, asset, recorded_at) DO UPDATE SET
+                            apy_percent = EXCLUDED.apy_percent,
+                            tvl_usd = EXCLUDED.tvl_usd
+                        """, (
+                            protocol_id,
+                            pool.get('symbol', 'unknown'),
+                            float(pool.get('apy', 0)),
+                            float(pool.get('tvlUsd', 0)),
+                            float(pool.get('tvlUsd', 0)),
+                            float(pool.get('tvlUsd', 0)),
+                            recorded_at
+                        ))
                 conn.commit()
         except Exception as e:
             logger.error(f"PostgreSQL sync failed: {e}")
