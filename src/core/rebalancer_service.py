@@ -358,6 +358,15 @@ class RebalancerService:
             prediction_type = forced_type if forced_type else "HOLD"
 
             actual_current_symbol = override_current_symbol if override_current_symbol else self.current_pool_symbol
+            
+            # Helper Variables
+            top_idx = np.argmax(weights)
+            runner_ups = [] # Simplified for stability
+            confidence_breakdown = {
+                "yield_momentum": float(weights[top_idx]),
+                "stability_score": 0.5, # Default
+                "token_correlation": 0.2
+            }
 # ... (rest of function) ...
             self.tracker.record_prediction(
                 prediction_type=prediction_type,
