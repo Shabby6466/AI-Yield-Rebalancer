@@ -210,6 +210,9 @@ class RebalancerService:
         eth_price_float, price_updated_at = await self.chainlink.get_asset_price('ETH')
         eth_price = Decimal(str(eth_price_float))
         
+        # Calculate portfolio size BEFORE lag check (needed for error messages)
+        PORTFOLIO_SIZE = Decimal(str(wallet_balance)) * eth_price if wallet_balance > 0.01 else Decimal(os.getenv("PORTFOLIO_SIZE_USD", "100000.0"))
+        
         # Oracle Lag Safety with Escalating Warnings
         lag_seconds = int(datetime.utcnow().timestamp()) - price_updated_at
         lag_minutes = lag_seconds / 60
@@ -244,8 +247,7 @@ class RebalancerService:
                 logger.error(f"🚨 ORACLE LAG DETECTED: ETH Price is {lag_seconds}s stale (Max: {WARN_THRESHOLD}s). Aborting cycle for safety.")
                 return
 
-        # If wallet has balance, use it. Otherwise fallback to ENV for safety.
-        PORTFOLIO_SIZE = Decimal(str(wallet_balance)) * eth_price if wallet_balance > 0.01 else Decimal(os.getenv("PORTFOLIO_SIZE_USD", "100000.0"))
+
         logger.info(f"DYNAMIC_CAPITAL: Scaling decisions based on ${float(PORTFOLIO_SIZE):,.2f} total assets (ETH @ ${float(eth_price):,.2f})")
 
         # Enhanced ML Prediction Audit (Liquidity-Aware & Threaded)
