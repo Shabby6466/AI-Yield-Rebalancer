@@ -371,70 +371,74 @@ with tab1:
                     st.error(f"API Error {response.status_code}: {response.text}")
                 else:
                     result = response.json()
-                    
-                    # Display Result
-                    c1, c2, c3 = st.columns(3)
-                    
-                    # Color code action
-                    action_color = "green" if result['action'] == "REBALANCE" else "red"
-                    c1.markdown(f"#### Action: :{action_color}[{result['action']}]")
-                    
-                    c2.metric("Confidence Score", f"{result['confidence']*100:.0f}%")
-                    c3.metric("Net APY Gain", f"{result['net_apy_gain']*100:.2f}%")
-                    
-                    st.info(f"**Reasoning:** {result['reason']}")
-                    
-                    # Row 2: Pool Metadata (New Section)
-                    with st.expander("📋 Pool Metadata (Addresses & Chain)", expanded=True):
-                        meta = result.get('market_context', {}).get('target_metadata', {})
-                        if meta:
-                            mp1, mp2 = st.columns(2)
-                            pool_addr = meta.get('pool', 'N/A')
-                            chain = meta.get('chain', 'Ethereum')
-                            
-                            # Helper for Etherscan links
-                            def get_scan_link(addr, chain_name):
-                                prefix = "https://etherscan.io/address"
-                                if chain_name.lower() == 'base': prefix = "https://basescan.org/address"
-                                return f"[{addr[:6]}...{addr[-4:]}]({prefix}/{addr})"
-
-                            mp1.markdown(f"**Pool**: {get_scan_link(pool_addr, chain)}")
-                            mp1.markdown(f"**Chain**: {chain}")
-                            mp1.markdown(f"**TVL**: ${meta.get('tvlUsd', 0):,.2f}")
-                            
-                            # Show Tokens
-                            tokens = meta.get('underlyingTokens', [])
-                            if tokens:
-                                token_links = [get_scan_link(t, chain) for t in tokens]
-                                mp2.markdown(f"**Tokens**: {', '.join(token_links)}")
-                        else:
-                            st.info("No detailed metadata available.")
-
-                    st.markdown("### 💸 Cost & Profit Analysis")
-                    m = result.get('metrics')
-                    if m:
-                        # Visual Breakdown
-                        mc1, mc2, mc3 = st.columns(3)
-                        mc1.metric("⛽ Gas Cost", f"${m.get('gas_exit',0) + m.get('gas_bridge',0) + m.get('gas_enter',0):.2f}")
-                        mc2.metric("🔄 Swap Fees", f"${m.get('swap_fees',0):.2f}")
-                        mc3.metric(" Total Loss", f"${m.get('total_conversion_loss',0):.2f}", help="Gas + Swap Fees")
-                        
-                        roi = m.get('roi_days', 999)
-                        if roi < 365:
-                            st.success(f"📅 **ROI Period:** Breakeven in **{roi:.1f} days**.")
-                        else:
-                            st.warning(f"📅 **ROI Period:** >1 Year ({roi:.1f} days). Not recommended.")
-                    else:
-                        st.info("Metrics not calculated (likely due to missing data or 0 confidence).")
-
-                    with st.expander("Raw API Response"):
-                        st.json(result)
-                    
-                    # Save result to session state for other tabs
                     st.session_state['last_decision'] = result
-                    
+                    st.session_state['last_decision_response'] = result 
+    
             except Exception as e:
                 st.error(f"Error communicating with Brain: {e}")
+
+    # --- Reusable Display Function ---
+    def display_brain_result(result):
+        # Display Result
+        c1, c2, c3 = st.columns(3)
+        
+        # Color code action
+        action_color = "green" if result['action'] == "REBALANCE" else "red"
+        c1.markdown(f"#### Action: :{action_color}[{result['action']}]")
+        
+        c2.metric("Confidence Score", f"{result['confidence']*100:.0f}%")
+        c3.metric("Net APY Gain", f"{result['net_apy_gain']*100:.2f}%")
+        
+        st.info(f"**Reasoning:** {result['reason']}")
+        
+        # Row 2: Pool Metadata
+        with st.expander("📋 Pool Metadata (Addresses & Chain)", expanded=True):
+            meta = result.get('market_context', {}).get('target_metadata', {})
+            if meta:
+                mp1, mp2 = st.columns(2)
+                pool_addr = meta.get('pool', 'N/A')
+                chain = meta.get('chain', 'Ethereum')
+                
+                # Helper for Etherscan links
+                def get_scan_link(addr, chain_name):
+                    prefix = "https://etherscan.io/address"
+                    if chain_name.lower() == 'base': prefix = "https://basescan.org/address"
+                    return f"[{addr[:6]}...{addr[-4:]}]({prefix}/{addr})"
+
+                mp1.markdown(f"**Pool**: {get_scan_link(pool_addr, chain)}")
+                mp1.markdown(f"**Chain**: {chain}")
+                mp1.markdown(f"**TVL**: ${meta.get('tvlUsd', 0):,.2f}")
+                
+                tokens = meta.get('underlyingTokens', [])
+                if tokens:
+                    token_links = [get_scan_link(t, chain) for t in tokens]
+                    mp2.markdown(f"**Tokens**: {', '.join(token_links)}")
+            else:
+                st.info("No detailed metadata available.")
+
+        st.markdown("### 💸 Cost & Profit Analysis")
+        m = result.get('metrics')
+        if m:
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.metric("⛽ Gas Cost", f"${m.get('gas_exit',0) + m.get('gas_bridge',0) + m.get('gas_enter',0):.2f}")
+            mc2.metric("🔄 Swap Fees", f"${m.get('swap_fees',0):.2f}")
+            mc3.metric(" Total Loss", f"${m.get('total_conversion_loss',0):.2f}", help="Gas + Swap Fees")
+            
+            roi = m.get('roi_days', 999)
+            if roi < 365:
+                st.success(f"📅 **ROI Period:** Breakeven in **{roi:.1f} days**.")
+            else:
+                st.warning(f"📅 **ROI Period:** >1 Year ({roi:.1f} days). Not recommended.")
+        else:
+            st.info("Metrics not calculated (likely due to missing data or 0 confidence).")
+
+        with st.expander("Raw API Response"):
+            st.json(result)
+
+    # --- Render Result (Either Fresh or Persisted) ---
+    if 'last_decision_response' in st.session_state:
+        display_brain_result(st.session_state['last_decision_response'])
+
     st.markdown("###  Historical Yield Analysis (30 Days)")
     
     if current_asset_id and target_asset_id:

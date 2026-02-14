@@ -249,3 +249,37 @@ sequenceDiagram
 | **Recovery Time** | Autonomous (Instant) | Autonomous (Next Cycle) |
 
 This stress test proves that while the AI Brain is aggressive at seeking yield, the **Safety Shield is Absolute**.
+
+---
+
+## 🚀 Deployment & Docker Operations
+
+The system is fully containerized for easy deployment.
+
+### 1. 🏁 Quick Start
+```bash
+docker compose up -d --build
+```
+This launches all services:
+*   **Brain API**: `http://localhost:8000`
+*   **Dashboard**: `http://localhost:8501`
+*   **Rebalancer**: Background worker
+*   **Anvil**: Local fork at `http://localhost:8545`
+
+### 2. 🐛 Troubleshooting & Updates
+If you modify code and don't see changes (due to volume issues on remote servers):
+```bash
+# Force rebuild to pick up new dependencies
+docker compose build --no-cache brain
+
+# If volumes aren't syncing files, manually copy:
+docker compose cp src/api/server.py brain:/app/src/api/server.py
+docker compose restart brain
+```
+
+### 3. 📜 Logs
+To see the brain's decision process or errors:
+```bash
+docker compose logs -f brain
+docker compose logs -f rebalancer
+```

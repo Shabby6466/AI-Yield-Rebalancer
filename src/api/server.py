@@ -50,6 +50,7 @@ class PredictionResponse(BaseModel):
     estimated_gas: float
     net_apy_gain: float
     metrics: Optional[Dict[str, float]] = None
+    market_context: Optional[Dict] = None
 
 @app.get("/health")
 def health_check():
