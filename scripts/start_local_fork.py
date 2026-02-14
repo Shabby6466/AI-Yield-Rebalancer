@@ -72,17 +72,28 @@ def deploy_contracts():
         # Fallback for Docker environment
         forge_path = "/root/.foundry/bin/forge"
 
+    # Build remappings using absolute paths for Docker stability
+    contracts_dir = os.path.abspath("contracts")
+    oz_path = os.path.join(contracts_dir, "lib/openzeppelin-contracts/contracts/")
+    forge_std_path = os.path.join(contracts_dir, "lib/forge-std/src/")
+    
+    if not os.path.exists(oz_path):
+        print(f"❌ Error: OpenZeppelin contracts not found at {oz_path}")
+        print("💡 Tip: Try running 'git submodule update --init --recursive' on your server.")
+        return None
+
     cmd = [
         forge_path, "create",
         "src/StrategyHub.sol:StrategyHub",
         "--rpc-url", RPC_URL,
         "--private-key", PK,
         "--constructor-args", USDC, AAVE_POOL, AUSDC, COMPOUND_COMET,
-        "--remappings", "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
-        "--remappings", "forge-std/=lib/forge-std/src/"
+        "--remappings", f"@openzeppelin/contracts/={oz_path}",
+        "--remappings", f"forge-std/={forge_std_path}"
     ]
     
-    result = subprocess.run(cmd, cwd="contracts", capture_output=True, text=True)
+    print(f"Running Forge Command in {contracts_dir}...")
+    result = subprocess.run(cmd, cwd=contracts_dir, capture_output=True, text=True)
     if result.returncode == 0:
         # Extract address from output
         for line in result.stdout.split("\n"):

@@ -20,12 +20,13 @@ async def main():
     load_dotenv()
     logger.info("🚀 Starting AI Yield Rebalancer Autonomous Loop...")
     
-    try:
-        service = RebalancerService()
-        await service.start()
-    except Exception as e:
-        logger.error(f"FATAL: Rebalancer service failed to start: {e}", exc_info=True)
-        sys.exit(1)
+    while True:
+        try:
+            service = RebalancerService()
+            await service.start()
+        except Exception as e:
+            logger.error(f"Error in rebalancer service: {e}. Retrying in 10s...", exc_info=True)
+            await asyncio.sleep(10)
 
 if __name__ == "__main__":
     asyncio.run(main())
