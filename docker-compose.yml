@@ -64,8 +64,7 @@ services:
   # 4. Analytics Front-end (Streamlit Dashboard)
   dashboard:
     build: .
-    ports:
-      - "8501:8501"
+    # Note: Inside Docker, Nginx communicates via port 8501
     depends_on:
       db:
         condition: service_healthy
@@ -80,6 +79,27 @@ services:
       - ./contracts:/app/contracts
       - ./models:/app/models
     command: streamlit run dashboard/app.py --server.address 0.0.0.0
+
+  # 5. Production Gateway (Nginx)
+  gateway:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deployments/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    depends_on:
+      - dashboard
+
+  # 6. SSL Automator (Certbot)
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 
 volumes:
   timescale_data:
