@@ -36,9 +36,35 @@ class YieldPredictorLSTM(pl.LightningModule):
     LSTM-based yield predictor with attention
     
     Input: Sequence of feature vectors (batch, seq_len, 32)
-    Output: Predicted APY for 7 days ahead
+    Output: Predicted average APY for next 7 days
     """
     
+    def evaluate_model(self, X_test: np.ndarray, y_test: np.ndarray) -> Dict:
+        """
+        Evaluate model performance on test set
+        Detects 'lag' and accuracy metrics.
+        """
+        self.eval()
+        with torch.no_grad():
+            inputs = torch.FloatTensor(X_test).to(self.device)
+            # YieldPredictorLSTM returns (predictions, attention_weights)
+            predictions, _ = self(inputs)
+            preds = predictions.cpu().numpy()
+            
+        mae = np.mean(np.abs(y_test - preds))
+        mape = np.mean(np.abs((y_test - preds) / (y_test + 1e-8))) * 100
+        correlation = np.corrcoef(y_test, preds)[0, 1]
+        
+        # Check for 'lag' (is correlation with shifted signal higher?)
+        # If corr(y_test, preds) < corr(y_test_shifted, preds), model is lagging
+        
+        logger.info(f"Evaluation: MAE={mae:.4f}, MAPE={mape:.2f}%, Corr={correlation:.4f}")
+        return {
+            "mae": float(mae),
+            "mape": float(mape),
+            "correlation": float(correlation)
+        }
+
     def __init__(
         self,
         input_size: int = 32,

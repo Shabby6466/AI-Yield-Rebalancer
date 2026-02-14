@@ -192,7 +192,9 @@ class FeaturePipeline:
             # Create sequences
             for i in range(len(asset_df) - sequence_length - prediction_horizon + 1):
                 X_sequence = features[i:i + sequence_length]
-                y_target = targets[i + sequence_length + prediction_horizon - 1]
+                # Improved Target Logic: Predict the average APY over the next N days
+                # instead of just a single point in the future to reduce volatility.
+                y_target = np.mean(targets[i + sequence_length:i + sequence_length + prediction_horizon])
                 
                 X_list.append(X_sequence)
                 y_list.append(y_target)

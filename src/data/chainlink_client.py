@@ -46,7 +46,7 @@ class ChainlinkClient:
         self.w3 = w3
         logger.info("ChainlinkClient initialized with Web3 provider.")
 
-    def get_asset_price(self, asset_symbol: str) -> float:
+    async def get_asset_price(self, asset_symbol: str) -> float:
         """
         Fetch latest price for an asset (e.g., 'ETH', 'USDC').
         """
@@ -55,22 +55,25 @@ class ChainlinkClient:
             logger.warning(f"No price feed found for {asset_symbol}, defaulting to 1.0")
             return 1.0
 
-        try:
+        def _fetch_price():
             contract = self.w3.eth.contract(address=self.w3.to_checksum_address(addr), abi=CHAINLINK_ABI)
             # answer is the price
             _, answer, _, _, _ = contract.functions.latestRoundData().call()
             decimals = contract.functions.decimals().call()
-            
-            price = float(answer) / (10 ** decimals)
+            return float(answer) / (10 ** decimals)
+
+        try:
+            # Run blocking Web3 call in a thread to keep the async loop alive
+            price = await asyncio.to_thread(_fetch_price)
             return price
         except Exception as e:
             logger.error(f"Failed to fetch {asset_symbol} price from Chainlink: {e}")
             # Fallback for ETH if we really need it for decision math
             return 2500.0 if asset_symbol == 'ETH' else 1.0
 
-    def check_peg_stability(self, asset_symbol: str, threshold: float = 0.98) -> bool:
+    async def check_peg_stability(self, asset_symbol: str, threshold: float = 0.98) -> bool:
         """
         Check if a stablecoin asset is maintaining its peg.
         """
-        price = self.get_asset_price(asset_symbol)
+        price = await self.get_asset_price(asset_symbol)
         return price >= threshold

@@ -88,37 +88,55 @@ def prepare_time_series_data(db_url: str, sequence_length: int = 7):
     
     # Create sequences
     X = []  # Input sequences
-    y = []  # Target APYs
+    y = []  # Target APYs (Average over horizon)
+    prediction_horizon = 7
     
     for asset, history in asset_data.items():
-        if len(history) >= sequence_length + 1:
+        if len(history) >= sequence_length + prediction_horizon:
             # Sort by timestamp
             history = sorted(history, key=lambda x: x['timestamp'])
             
             # Create sliding windows
-            for i in range(len(history) - sequence_length):
+            for i in range(len(history) - sequence_length - prediction_horizon + 1):
                 # Input: past sequence_length points
-                seq = np.array([
+                base_seq = np.array([
                     [h['apy'], h['tvl'], h['util'], h['risk']]
                     for h in history[i:i+sequence_length]
                 ])
                 
-                # Target: next APY (or average of next few)
-                target_apy = history[i + sequence_length]['apy']
+                # Expand 4 base features -> 32 technical features
+                from src.execution.ml_prediction_service import MLPredictionService
+                # We can't easily instantiate it here without network, so we use a dummy expansion or local copy
+                # Let's implement the expansion locally for the script to avoid cyclic imports or heavy initialization
+                expanded_seq = np.zeros((sequence_length, 32))
+                expanded_seq[:, 0:4] = base_seq
                 
-                X.append(seq)
+                # Moving Averages & Trends
+                for j in range(2, sequence_length):
+                    expanded_seq[j, 4:8] = np.mean(base_seq[j-2:j+1, 0:4], axis=0) # 3-step MA
+                for j in range(6, sequence_length):
+                    expanded_seq[j, 8:12] = np.mean(base_seq[j-6:j+1, 0:4], axis=0) # 7-step MA
+                for j in range(1, sequence_length):
+                    expanded_seq[j, 16:20] = base_seq[j, 0:4] - base_seq[j-1, 0:4] # Momentum
+                
+                # Target: average of next few steps (prediction_horizon)
+                target_apy = np.mean([
+                    h['apy'] for h in history[i + sequence_length : i + sequence_length + prediction_horizon]
+                ])
+                
+                X.append(expanded_seq)
                 y.append(target_apy)
     
-    X = np.array(X)
-    y = np.array(y)
+    X = np.array(X).astype(np.float32)
+    y = np.array(y).astype(np.float32)
     
     logger.info(f"Created {len(X)} sequences")
     logger.info(f"Sequence shape: {X.shape}")
     logger.info(f"Target shape: {y.shape}")
     logger.info(f"Target range: {y.min():.3f}% to {y.max():.3f}%")
     
-    # Normalize features (4 features per timestep)
-    X_flat = X.reshape(-1, 4)  # Flatten all sequences for scaling
+    # Normalize features (32 features per timestep)
+    X_flat = X.reshape(-1, 32)  # Flatten all sequences for scaling
     scaler = StandardScaler()
     X_flat_norm = scaler.fit_transform(X_flat)
     X_norm = X_flat_norm.reshape(X.shape)

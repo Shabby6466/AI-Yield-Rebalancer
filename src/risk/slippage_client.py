@@ -16,6 +16,12 @@ class SlippageClient:
         self.one_inch_url = "https://api.1inch.dev/swap/v6.0"
         self.api_key = os.getenv("ONE_INCH_API_KEY")
 
+    def get_expected_slippage_sync(self, from_token: str, to_token: str, amount_usd: float) -> float:
+        """Synchronous wrapper for slippage estimation"""
+        if not self.api_key:
+            return self._simulate_slippage(amount_usd)
+        return 0.0005 # Placeholder for sync call
+
     async def get_expected_slippage(self, 
                                    from_token: str, 
                                    to_token: str, 

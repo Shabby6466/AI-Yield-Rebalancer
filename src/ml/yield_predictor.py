@@ -35,8 +35,9 @@ class YieldDataset(Dataset):
         # Input: last lookback_window days of features
         x = self.data[idx:idx + self.lookback]
         
-        # Target: APY at prediction_horizon days ahead
-        y = self.data[idx + self.lookback + self.horizon - 1, 0]  # APY is first feature
+        # Target: Average APY over the prediction_horizon (more stable than single point)
+        # Assuming APY is the first feature (index 0)
+        y = np.mean(self.data[idx + self.lookback : idx + self.lookback + self.horizon, 0])
         
         return torch.FloatTensor(x), torch.FloatTensor([y])
 

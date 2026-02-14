@@ -44,7 +44,11 @@ class RebalancerService:
     
     def __init__(self):
         load_dotenv()
-        self.w3 = Web3(Web3.HTTPProvider(os.getenv("RPC_URL")))
+        # Add a strict request timeout to prevent hanging on slow RPCs
+        self.w3 = Web3(Web3.HTTPProvider(
+            os.getenv("RPC_URL"),
+            request_kwargs={'timeout': 20}
+        ))
         self.signer = Account.from_key(os.getenv("KEEPER_PRIVATE_KEY"))
         
         # Phase 1: Institutional Intelligence Layer
@@ -99,7 +103,7 @@ class RebalancerService:
         
         # -1. Auto-Validate Maturing Predictions
         try:
-            val_results = self.tracker.auto_validate_from_db()
+            val_results = await asyncio.to_thread(self.tracker.auto_validate_from_db)
             if val_results:
                 logger.info(f"Auto-validated {len(val_results)} maturing predictions.")
         except Exception as e:
@@ -130,15 +134,16 @@ class RebalancerService:
                 logger.error(f"Failed to sync current pool: {e}")
 
         # 1. Layer 1: Data Ingestion & Market Health
-        is_healthy, safety_report = self.guard.check_market_health()
+        # Wrap in thread since it makes synchronous Web3 calls
+        is_healthy, safety_report = await asyncio.to_thread(self.guard.check_market_health)
         if not is_healthy:
             return
 
         # 2. Ingest broad market data
         latest_features = await self._fetch_latest_market_state()
         
-        # 3. Brain Inference
-        weights = self.brain.predict(latest_features)
+        # 3. Brain Inference (Threaded CPU Task)
+        weights = await asyncio.to_thread(self.brain.predict, latest_features)
         
         # 3.5 Final Metadata Sync (Ensure symbol is never 'CASH' if we have an ID)
         if self.current_pool_id and self.current_pool_id != "none":
@@ -170,24 +175,24 @@ class RebalancerService:
             top_idx = np.argmax(weights)
             target_pool = self.last_scanned_pools[top_idx]
 
-        # --- DYNAMIC CAPITAL LOGIC ---
-        # Fetch live wallet balance to determine real portfolio size
+        # Fetch live wallet balance to determine real portfolio size (Threaded)
         try:
-            raw_bal = self.w3.eth.get_balance(self.signer.address)
+            raw_bal = await asyncio.to_thread(self.w3.eth.get_balance, self.signer.address)
             wallet_balance = float(self.w3.from_wei(raw_bal, 'ether'))
             logger.info(f"WALLET CHECK: {self.signer.address} has {wallet_balance:.4f} ETH")
         except Exception as e:
             logger.error(f"Wallet Check Failed: {e}")
             wallet_balance = 0.0
 
-        # Fetch Live ETH Price from Chainlink
-        eth_price = self.chainlink.get_asset_price('ETH')
+        # Fetch Live ETH Price from Chainlink (Async/Threaded)
+        eth_price = await self.chainlink.get_asset_price('ETH')
         # If wallet has balance, use it. Otherwise fallback to ENV for safety.
         PORTFOLIO_SIZE = wallet_balance * eth_price if wallet_balance > 0.01 else float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
         logger.info(f"DYNAMIC_CAPITAL: Scaling decisions based on ${PORTFOLIO_SIZE:,.2f} total assets (ETH @ ${eth_price:,.2f})")
 
-        # Enhanced ML Prediction Audit (Liquidity-Aware)
-        ml_audit = self.ml_service.generate_prediction(
+        # Enhanced ML Prediction Audit (Liquidity-Aware & Threaded)
+        ml_audit = await asyncio.to_thread(
+            self.ml_service.generate_prediction,
             pool_address=target_pool['pool'], 
             asset_address=target_pool.get('symbol', 'USDC'),
             portfolio_size_usd=PORTFOLIO_SIZE
@@ -247,7 +252,10 @@ class RebalancerService:
         gas_price_gwei = self.w3.eth.gas_price / 1e9
         tx_gas_limit = 500000
         gas_cost_usd = (tx_gas_limit * gas_price_gwei * 1e-9) * eth_price
-        estimated_slippage = await self.slippage.get_expected_slippage("USDC", "USDT", PORTFOLIO_SIZE)
+        # Wrap slippage check in thread
+        estimated_slippage = await asyncio.to_thread(
+            self.slippage.get_expected_slippage_sync, "USDC", "USDT", PORTFOLIO_SIZE
+        )
         total_costs_usd = gas_cost_usd + (PORTFOLIO_SIZE * estimated_slippage)
         monthly_gain_usd = (PORTFOLIO_SIZE * (apy_gain / 100)) / 12
         net_profit_usd = monthly_gain_usd - total_costs_usd
@@ -329,10 +337,10 @@ class RebalancerService:
             
         # 5. Layer 4: Execution
         if os.getenv("NETWORK") == "local":
-            success = self._send_direct_bundle(rebalance_txs)
+            success = await asyncio.to_thread(self._send_direct_bundle, rebalance_txs)
         else:
-            current_block = self.w3.eth.block_number
-            success = self.hands.send_rebalance_bundle(rebalance_txs, current_block + 1)
+            current_block = await asyncio.to_thread(getattr, self.w3.eth, 'block_number') # Sync prop
+            success = await asyncio.to_thread(self.hands.send_rebalance_bundle, rebalance_txs, current_block + 1)
         
         if success:
             logger.info(f"   - [Step 4] Rebalance Verified! Capital successfully shifted.")
@@ -345,7 +353,7 @@ class RebalancerService:
             self.current_pool_symbol = target_pool['symbol']
             self.current_apy = target_apy
             
-            self.state_store.save_state(self.current_pool_id, self.current_pool_symbol, self.current_apy)
+            await asyncio.to_thread(self.state_store.save_state, self.current_pool_id, self.current_pool_symbol, self.current_apy)
             
             # Phase 4: Monitoring the Pulse
             p4_msg = f"💓 Phase 4: Monitoring the Pulse\n- Yield Watch: Tracking {target_pool['symbol']} for trend decay...\n- Circuit Breaker: Safety rails active and monitoring TVL/Peg."
@@ -408,8 +416,9 @@ class RebalancerService:
             price_eth = metrics.get('eth_price', 2500.0) if metrics else 2500.0
             dynamic_capital = wallet_eth * price_eth if wallet_eth > 0.01 else float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
 
-            # Call Record Prediction with FULL ARGUMENTS
-            self.tracker.record_prediction(
+            # Call Record Prediction with FULL ARGUMENTS (Threaded DB I/O)
+            await asyncio.to_thread(
+                self.tracker.record_prediction,
                 prediction_type=prediction_type,
                 current_pool_id=override_current_id if override_current_id else self.current_pool_id,
                 current_pool_apy=override_current_apy if override_current_apy else self.current_apy,

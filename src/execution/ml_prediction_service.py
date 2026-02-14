@@ -21,6 +21,7 @@ import random
 from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2 import pool
 
 # Import existing contract manager
 from src.execution.contract_manager import ContractManager
@@ -37,31 +38,48 @@ class DatabaseLogger:
     """Log predictions and rebalancing to PostgreSQL"""
     
     def __init__(self, db_name: str = "rebalancer"):
-        """Initialize database connection"""
+        """Initialize database connection pool"""
         try:
             db_url = os.getenv('DATABASE_URL')
+            # Initialize connection pool for stability
             if db_url:
-                self.conn = psycopg2.connect(db_url)
-                logger.info(f"✓ Connected to database via DATABASE_URL")
+                self.pool = pool.ThreadedConnectionPool(1, 10, db_url)
+                logger.info(f"✓ Database connection pool initialized")
             else:
-                # Fallback for local dev
-                self.conn = psycopg2.connect(
+                self.pool = pool.ThreadedConnectionPool(
+                    1, 10,
                     dbname=db_name,
                     user=os.getenv('DB_USER', os.getenv('USER', 'admin')),
-                    password=os.getenv('DB_PASSWORD')
+                    password=os.getenv('DB_PASSWORD'),
+                    host=os.getenv('DB_HOST', 'localhost')
                 )
-                logger.info(f"✓ Connected to database: {db_name}")
+                logger.info(f"✓ Local database connection pool initialized")
         except Exception as e:
-            logger.warning(f"Database connection failed: {e}")
-            self.conn = None
+            logger.warning(f"Database connection pool failed: {e}")
+            self.pool = None
     
+    def _get_conn(self):
+        """Get connection from pool with reconnect logic"""
+        if not self.pool:
+            return None
+        try:
+            return self.pool.getconn()
+        except:
+            return None
+
+    def _put_conn(self, conn):
+        """Return connection to pool"""
+        if self.pool and conn:
+            self.pool.putconn(conn)
+
     def log_prediction(self, prediction: Dict) -> bool:
         """Log ML prediction to database"""
-        if not self.conn:
+        conn = self._get_conn()
+        if not conn:
             return False
         
         try:
-            with self.conn.cursor() as cur:
+            with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO ml_predictions (
                         network, pool_address, asset_address, protocol_name,
@@ -83,22 +101,25 @@ class DatabaseLogger:
                 ))
                 
                 prediction_id = cur.fetchone()[0]
-                self.conn.commit()
+                conn.commit()
                 logger.info(f"✓ Logged prediction #{prediction_id} to database")
                 return True
                 
         except Exception as e:
             logger.error(f"Failed to log prediction: {e}")
-            self.conn.rollback()
+            conn.rollback()
             return False
+        finally:
+            self._put_conn(conn)
     
     def log_rebalance(self, rebalance_data: Dict) -> bool:
         """Log rebalancing event to database"""
-        if not self.conn:
+        conn = self._get_conn()
+        if not conn:
             return False
         
         try:
-            with self.conn.cursor() as cur:
+            with conn.cursor() as cur:
                 # Insert rebalance history
                 cur.execute("""
                     INSERT INTO rebalance_history (
@@ -136,19 +157,21 @@ class DatabaseLogger:
                         allocation.get('risk_level', 'medium')
                     ))
                 
-                self.conn.commit()
+                conn.commit()
                 logger.info(f"✓ Logged rebalance #{rebalance_id} to database")
                 return True
                 
         except Exception as e:
             logger.error(f"Failed to log rebalance: {e}")
-            self.conn.rollback()
+            conn.rollback()
             return False
+        finally:
+            self._put_conn(conn)
     
     def close(self):
-        """Close database connection"""
-        if self.conn:
-            self.conn.close()
+        """Close database pool"""
+        if self.pool:
+            self.pool.closeall()
 
 
 class LSTMPredictor:
@@ -328,97 +351,185 @@ class MLPredictionService:
         
         logger.info(f"ML Prediction Service initialized for {network}")
     
+    # Common Mainnet Asset Addresses for mapping symbols to addresses
+    COMMON_ASSETS = {
+        'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+        'DAI': '0x6B175474E89094C44Da98b954EEDEAC495271d0F',
+        'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+        'ETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+    }
+
     def get_pool_features(self, pool_address: str, asset_address: str) -> Dict:
-        """Fetch current pool features for prediction"""
+        """Fetch accurate pool features with on-chain decimal verification"""
+        # Map symbol to address if needed
+        if len(asset_address) < 10:  # Likely a symbol like 'USDC'
+            asset_address = self.COMMON_ASSETS.get(asset_address.upper(), asset_address)
+        
         try:
-            # Get current pool state from contract
+            # 1. Define Standard ERC20 ABI for decimals
+            erc20_abi = [{"constant": True, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}], "type": "function"}]
+            asset_contract = self.contract_manager.w3.eth.contract(
+                address=self.contract_manager.w3.to_checksum_address(asset_address), 
+                abi=erc20_abi
+            )
+            
+            # 2. Fetch Decimals (Crucial for TVL and APY scaling)
+            try:
+                decimals = asset_contract.functions.decimals().call()
+            except Exception:
+                decimals = 18  # Fallback to standard
+                logger.warning(f"Could not fetch decimals for {asset_address}, defaulting to 18")
+
+            # 3. Get Strategy Manager and Pool Data
             strategy_manager = self.contract_manager.contracts.get('StrategyManager')
+            if not strategy_manager:
+                return {}
+
+            # Calculate poolId as bytes32 (Matches keccak256(abi.encodePacked(asset, pool)))
+            pool_id = self.contract_manager.w3.solidity_keccak(
+                ['address', 'address'], 
+                [asset_address, pool_address]
+            )
             
-            if strategy_manager:
-                try:
-                    # Calculate poolId
-                    pool_id = self.contract_manager.w3.keccak(
-                        self.contract_manager.w3.to_bytes(hexstr=asset_address) +
-                        self.contract_manager.w3.to_bytes(hexstr=pool_address)
-                    )
-                    
-                    # Get pool info
-                    pool_info = strategy_manager.functions.getPool(pool_id).call()
-                    current_apy = pool_info[3] / 100
-                    
-                    # Fix: TVL Scaling for low-decimal tokens (USDC/USDT)
-                    # For a real implementation, we'd fetch decimals() from the token contract
-                    # But for now, we use a heuristic for common stables.
-                    decimals = 18
-                    # Simple heuristic: if we are on a known pool from DeFiLlama, 
-                    # we should probably trust the TVL we got from the API if available.
-                    # If fetching from contract:
-                    tvl_raw = pool_info[4]
-                    if tvl_raw > 0:
-                        # Most stables are 6 or 18. If it's a huge number, it's 18.
-                        # If it looks like a small number of units, might be 6.
-                        # For POC: assume 18 unless it's very small.
-                        tvl = tvl_raw / 1e18 if tvl_raw > 1e12 else tvl_raw / 1e6
-                    else:
-                        tvl = 0.0
-                    
-                    logger.info(f"Pool {pool_address[:10]}... current APY: {current_apy}%, TVL: ${tvl:,.2f}")
-                except:
-                    current_apy = 0.0
-                    tvl = 0.0
-            else:
-                current_apy = 0.0
-                tvl = 0.0
+            pool_info = strategy_manager.functions.getPool(pool_id).call()
             
-            # Build feature dictionary
-            features = {
+            # 4. Scale Values Correctly
+            # pool_info[3] is APY in basis points (e.g., 550 = 5.5%)
+            current_apy = float(pool_info[3]) / 100.0
+            
+            # pool_info[4] is TVL in raw units (uint256)
+            tvl_raw = pool_info[4]
+            tvl_scaled = float(tvl_raw) / (10 ** decimals)
+
+            logger.info(f"Pool: {pool_address[:8]} | APY: {current_apy}% | TVL: ${tvl_scaled:,.2f}")
+
+            return {
                 'current_apy': current_apy,
-                'tvl': tvl,
+                'tvl': tvl_scaled,
+                'decimals': decimals,
                 'timestamp': datetime.now().timestamp(),
                 'pool_address': pool_address,
                 'asset_address': asset_address
             }
-            
-            return features
-            
+                
         except Exception as e:
-            logger.error(f"Failed to fetch pool features: {e}")
+            logger.error(f"Critical error fetching pool features: {e}")
             return {}
     
-    def get_historical_sequence(self, pool_address: str, sequence_length: int = 14) -> np.ndarray:
-        """Fetch real historical APY/TVL from DB to feed LSTM"""
+    def expand_features(self, base_sequence: np.ndarray) -> np.ndarray:
+        """
+        Expands base [APY, TVL, Vol, Risk] into 32 dimensions 
+        using technical indicators to match LSTM training.
+        """
+        seq_len = base_sequence.shape[0]
+        expanded = np.zeros((seq_len, 32))
+        
+        # indices 0-3: Raw features [APY, TVL, Vol, Risk]
+        expanded[:, 0:4] = base_sequence
+        
+        # indices 4-7: 3-day Moving Averages
+        for i in range(2, seq_len):
+            expanded[i, 4:8] = np.mean(base_sequence[i-2:i+1, 0:4], axis=0)
+            
+        # indices 8-11: 7-day Moving Averages
+        for i in range(6, seq_len):
+            expanded[i, 8:12] = np.mean(base_sequence[i-6:i+1, 0:4], axis=0)
+
+        # indices 12-15: 14-day Moving Averages (Last row only if short)
+        for i in range(min(13, seq_len-1), seq_len):
+            expanded[i, 12:16] = np.mean(base_sequence[max(0, i-13):i+1, 0:4], axis=0)
+            
+        # indices 16-19: Momentum (1-day diff)
+        for i in range(1, seq_len):
+            expanded[i, 16:20] = base_sequence[i, 0:4] - base_sequence[i-1, 0:4]
+
+        # indices 20-23: Rolling Volatility (7-day std)
+        for i in range(6, seq_len):
+            expanded[i, 20:24] = np.std(base_sequence[i-6:i+1, 0:4], axis=0)
+
+        # indices 24-27: Relative Strength Indicators (APY focused)
+        for i in range(1, seq_len):
+            change = base_sequence[i, 0] - base_sequence[i-1, 0]
+            expanded[i, 24] = change if change > 0 else 0 # Gains
+            expanded[i, 25] = abs(change) if change < 0 else 0 # Losses
+
+        # Fill remaining 26-31 with zeros or defaults
+        return expanded.astype(np.float32)
+
+    def get_historical_sequence(self, pool_address: str, asset_symbol: str = "USDC", sequence_length: int = 14) -> np.ndarray:
+        """Fetch ACTUAL historical APY from protocol_yields table to prevent data leakage"""
         sequence = []
-        if self.db_logger.conn:
+        conn = self.db_logger._get_conn()
+        if conn:
             try:
-                with self.db_logger.conn.cursor() as cur:
+                with conn.cursor() as cur:
+                    # Map pool_address (UUID) or name to protocol_id
+                    # For POC, we match by asset symbol and common protocol patterns
                     cur.execute("""
-                        SELECT predicted_apy, 0.0 as tvl FROM ml_predictions 
-                        WHERE pool_address = %s 
-                        ORDER BY recorded_at DESC LIMIT %s
-                    """, (pool_address, sequence_length))
+                        SELECT py.apy_percent, py.tvl_usd 
+                        FROM protocol_yields py
+                        JOIN protocols p ON py.protocol_id = p.id
+                        WHERE py.asset = %s
+                        AND (p.address = %s OR %s ILIKE '%' || p.symbol || '%')
+                        ORDER BY py.recorded_at DESC LIMIT %s
+                    """, (asset_symbol, pool_address, pool_address, sequence_length))
+                    
                     rows = cur.fetchall()
                     for row in reversed(rows):
-                        # Convert to 4-feature vector: [apy, tvl, vol, risk]
-                        sequence.append([float(row[0]), 0.0, 0.05, 0.5])
+                        # Use base features [APY, TVL, Vol, Risk]
+                        sequence.append([float(row[0]), float(row[1]), 0.05, 0.5])
             except Exception as e:
-                logger.warning(f"Failed to fetch history from DB: {e}")
+                logger.warning(f"Failed to fetch real history from DB: {e}")
+            finally:
+                self.db_logger._put_conn(conn)
         
         # Backfill with noise if sequence is short
         while len(sequence) < sequence_length:
-            # Simple noise-based backfill centered around 10% APY
-            sequence.insert(0, [random.gauss(10.0, 2.0), 0.0, 0.05, 0.5])
+            # Base features: APY, TVL, Vol, Risk
+            sequence.insert(0, [random.gauss(10.0, 2.0), 1_000_000.0, 0.05, 0.5])
             
-        return np.array(sequence).astype(np.float32)
+        base_np = np.array(sequence).astype(np.float32)
+        # Expand 4 base features -> 32 dimensions
+        return self.expand_features(base_np)
 
     def generate_prediction(self, pool_address: str, asset_address: str, portfolio_size_usd: float = 100000.0) -> Dict:
         """Generate ML prediction for a pool with Liquidity & History"""
         # Get pool features
         features = self.get_pool_features(pool_address, asset_address)
         
-        # 1. NEW: Real Historical Sequence prep
-        lstm_input = self.get_historical_sequence(pool_address, 14)
+        # 1. Real Historical Sequence prep (Fetched as base 4, then expanded)
+        # We need to fetch base history first to update the LAST element before expanding
+        # Re-fetch or manually update the expanded array
+        # Let's override get_historical_sequence to return base or just re-expand
+        
+        base_sequence = []
+        conn = self.db_logger._get_conn()
+        if conn:
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT py.apy_percent, py.tvl_usd 
+                        FROM protocol_yields py
+                        JOIN protocols p ON py.protocol_id = p.id
+                        WHERE py.asset = %s
+                        AND (p.address = %s OR %s ILIKE '%' || p.symbol || '%')
+                        ORDER BY py.recorded_at DESC LIMIT %s
+                    """, (asset_address if len(asset_address) < 10 else "USDC", pool_address, pool_address, 14))
+                    rows = cur.fetchall()
+                    for row in reversed(rows):
+                        base_sequence.append([float(row[0]), float(row[1]), 0.05, 0.5])
+            finally:
+                self.db_logger._put_conn(conn)
+        
+        while len(base_sequence) < 14:
+            base_sequence.insert(0, [random.gauss(10.0, 2.0), 1_000_000.0, 0.05, 0.5])
+            
         # Update last element with current features
-        lstm_input[-1] = [features.get('current_apy', 0), features.get('tvl', 0), 0.05, 0.5]
+        base_sequence[-1] = [features.get('current_apy', 0), features.get('tvl', 0), 0.05, 0.5]
+        
+        # Expand 4 -> 32
+        lstm_input = self.expand_features(np.array(base_sequence).astype(np.float32))
         
         # Predict APY
         predicted_apy = self.lstm_predictor.predict(lstm_input)
