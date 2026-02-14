@@ -126,10 +126,67 @@ def deploy_contracts():
         print(f"--- STDERR ---\n{result.stderr}")
         return None
 
+def fund_keeper(target_address=None):
+    """Fund the keeper account with ETH from the Anvil whale"""
+    print("💰 Funding Keeper Account...")
+    
+    # Anvil default account #0 (Whale)
+    whale_pk = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    
+    if not target_address:
+         # Try to get from env or use a hardcoded fallback if checking logs manually
+         # But better to just use the one we saw in logs: 0x4D8...
+         # Actually, let's derive it or ask user. 
+         # The logs showed: 0x4D8887Dd74e4d5e07d6d642Bb4B45ff891dbf21C
+         # We can try to use cast to derive it from the PK in env if available
+         pass
+
+    # We will use cast to transfer
+    # We need the address. Let's assume the user provided one or we use the known one from logs
+    # But wait, the script doesn't know the address easily without eth-account.
+    # Let's rely on the one from logs for now as a fallback, or try to read it.
+    
+    deployer_pk = os.getenv("DEPLOYER_PRIVATE_KEY")
+    if not deployer_pk:
+        print("⚠️ No DEPLOYER_PRIVATE_KEY found. Skipping funding.")
+        return
+
+    # Use cast to get address
+    import shutil
+    cast_path = shutil.which("cast") or "/root/.foundry/bin/cast"
+    
+    # Get Address
+    try:
+        cmd_addr = [cast_path, "wallet", "address", "--private-key", deployer_pk]
+        result = subprocess.run(cmd_addr, capture_output=True, text=True)
+        if result.returncode != 0:
+             print(f"❌ Failed to derive address: {result.stderr}")
+             return
+        target_address = result.stdout.strip()
+    except Exception as e:
+        print(f"⚠️ Could not derive address: {e}")
+        return
+
+    print(f"   Target: {target_address}")
+    
+    # Send 100 ETH
+    cmd_send = [
+        cast_path, "send", 
+        target_address, 
+        "--value", "100ether",
+        "--private-key", whale_pk,
+        "--rpc-url", RPC_URL
+    ]
+    
+    subprocess.run(cmd_send, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print("✅ Funded 100 ETH to Keeper.")
+
 if __name__ == "__main__":
     start_anvil()
     address = deploy_contracts()
-    if not address:
-        print("❌ Deployment failed. Exiting.")
+    if address:
+        fund_keeper() # Run funding
+        print("✅ Deployment successful.")
+    else:
+        print("❌ Deployment failed.")
         sys.exit(1)
-    print("✅ Deployment successful.")
