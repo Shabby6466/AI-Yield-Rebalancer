@@ -202,7 +202,7 @@ class RebalancerService:
         if pool_metadata and pool_metadata.get('pool_address'):
             pool_address = pool_metadata['pool_address']
         elif target_pool.get('symbol') == 'USP':
-             pool_address = '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6' # Direct fallback for USP
+             pool_address = '0x098697Ba3fEE4Ea76294c5d6a466a4E3b3e95fE6' # Direct fallback for USP
              
         ml_audit = await asyncio.to_thread(
             self.ml_service.generate_prediction,

@@ -358,14 +358,14 @@ class MLPredictionService:
         'DAI': '0x6B175474E89094C44Da98b954EEDEAC495271d0F',
         'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
         'ETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', # Map to WETH for contract logic
-        'USP': '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6',
+        'USP': '0x098697Ba3fEE4Ea76294c5d6a466a4E3b3e95fE6',
         'EURC': '0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c',
         'SUSDE': '0x9D39A5DE30e57443BfF2A8307A4256c8797A3497',
         'USDS': '0xdc035d45d973e3ec169d2276ddab16f1e407384f',
         # Yield-bearing "i" tokens (Instadapp/Lite)
         'IDAI': '0x611CC53503d97Dc9080c98f86f78716A803dB3f7',
         'IUSDC': '0x3274576510Cd38CB54B647185C01306C94339Be9',
-        'IUSDT': '0x3B68EF230a17409f583152Cd08064F250B39fEeD'
+        'IUSDT': '0x3B68EF230a17409f583152Cd08064F250B39fEed'
     }
 
     def get_pool_features(self, pool_address: str, asset_address: str) -> Dict:
@@ -387,11 +387,14 @@ class MLPredictionService:
              logger.warning(f"Invalid asset address for features: {asset_address}, trying USDC fallback")
              asset_address = self.VERIFIED_ADDRESSES['USDC']
         
+        # Checksum asset address
+        asset_address = Web3.to_checksum_address(asset_address)
+        
         try:
             # 1. Define Standard ERC20 ABI for decimals
             erc20_abi = [{"constant": True, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}], "type": "function"}]
             asset_contract = self.contract_manager.w3.eth.contract(
-                address=self.contract_manager.w3.to_checksum_address(asset_address), 
+                address=asset_address, 
                 abi=erc20_abi
             )
             
