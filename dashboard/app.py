@@ -44,7 +44,12 @@ try:
     
     if latest_preds:
         latest = latest_preds[0]
-        ctx = json.loads(latest['market_context']) if latest.get('market_context') else {}
+        try:
+            ctx = json.loads(latest['market_context']) if latest.get('market_context') else {}
+            if not isinstance(ctx, dict): ctx = {}
+        except:
+            ctx = {}
+        
         metrics = ctx.get('metrics', {})
         
         # 1. Balance
@@ -277,7 +282,8 @@ with tab2:
                     try:
                         if p.get('market_context'):
                             ctx = json.loads(p['market_context'])
-                    except: pass
+                        if not isinstance(ctx, dict): ctx = {}
+                    except: ctx = {}
 
                     # Fix logical ghost: Use context's current_pool_symbol
                     cur_sym = ctx.get('current_pool_symbol', 'CASH')

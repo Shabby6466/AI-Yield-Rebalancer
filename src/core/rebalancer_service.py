@@ -233,15 +233,17 @@ class RebalancerService:
         
         # 2. Protocol Fallbacks (If DB metadata is missing)
         if not resolved_address or not resolved_address.startswith('0x'):
-            if symbol == 'USP':
+            # Fuzzy matching for symbols and projects
+            symbol_up = symbol.upper()
+            if 'USP' in symbol_up:
                 resolved_address = '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6' 
-            elif 'aave' in project:
+            elif 'AAVE' in project or 'AAVE' in symbol_up:
                 resolved_address = '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2' # Aave V3 Pool
-            elif 'compound' in project:
+            elif 'COMPOUND' in project or 'COMP' in symbol_up:
                 resolved_address = '0xc3d688b66703497daa19211eedff47f25384cdc3' # Compound V3 Comet
-            elif 'ethena' in project or symbol == 'SUSDE':
+            elif 'ETHENA' in project or 'SUSDE' in symbol_up or 'USDE' in symbol_up:
                 resolved_address = '0x9d39a5de30e57443bff2a8307a4256c8797a3497' # Ethena sUSDe
-            elif symbol == 'USDC':
+            elif 'USDC' in symbol_up:
                  resolved_address = '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2' # Default USDC to Aave
         
         # 3. Hard Safety Check: Never pass a UUID to the ML service
