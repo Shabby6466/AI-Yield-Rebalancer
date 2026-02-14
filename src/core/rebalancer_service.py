@@ -15,6 +15,7 @@ from src.execution.ml_prediction_service import MLPredictionService
 import numpy as np
 import random
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Configure logging to both console and file for dashboard tailing
@@ -182,9 +183,9 @@ class RebalancerService:
         
         # Live Wallet Tracking
         try:
-            raw_bal = self.w3.eth.get_balance(self.account.address)
+            raw_bal = self.w3.eth.get_balance(self.signer.address)
             wallet_balance = float(self.w3.from_wei(raw_bal, 'ether'))
-            logger.info(f"💰 WALLET CHECK: {self.account.address} has {wallet_balance:.4f} ETH")
+            logger.info(f"💰 WALLET CHECK: {self.signer.address} has {wallet_balance:.4f} ETH")
         except Exception as e:
             logger.error(f"❌ Wallet Check Failed: {e}")
             wallet_balance = 0.0
