@@ -58,12 +58,12 @@ services:
       - ./models:/app/models
     command: >
       bash -c "
+        export PYTHONPATH=/app &&
         echo '🚢 Phase 1: Deploying Smart Contracts...' &&
         python3 scripts/start_local_fork.py &&
         echo '📊 Phase 1.5: Seeding Database...' &&
         python3 src/scheduler/collector.py --once &&
         echo '🧠 Phase 2: Starting Full AI Stack (Server + Agent + Collector)...' &&
-        export PYTHONPATH=/app &&
         # 1. Start API Server (Background)
         uvicorn src.api.server:app --host 0.0.0.0 --port 8000 &
         # 2. Start Data Collector Loop (Background)
