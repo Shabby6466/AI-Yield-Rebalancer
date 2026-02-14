@@ -55,11 +55,11 @@ services:
       - ./models:/app/models
     command: >
       bash -c "
-        echo '🚀 Initializing Full Stack Deploy...' &&
-        python scripts/start_local_fork.py &&
-        echo '🧠 Starting AI Rebalancer loop...' &&
+        echo '🚢 Phase 1: Deploying Smart Contracts...' &&
+        python3 scripts/start_local_fork.py &&
+        echo '🧠 Phase 2: Starting AI Rebalancer loop...' &&
         export PYTHONPATH=/app &&
-        python src/scheduler/rebalancer_loop.py
+        python3 src/scheduler/rebalancer_loop.py
       "
 
   # 4. Analytics Front-end (Streamlit Dashboard)

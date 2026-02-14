@@ -30,8 +30,8 @@ def start_anvil():
     import shutil
     anvil_path = shutil.which("anvil")
     if not anvil_path:
-        # Fallback to local user path
-        anvil_path = "/Users/Akmal/.foundry/bin/anvil"
+        # Fallback for Docker environment
+        anvil_path = "/root/.foundry/bin/anvil"
 
     print(f"Starting Anvil fork of mainnet...")
     fork_url = f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}" if ALCHEMY_API_KEY else "https://eth.drpc.org"
@@ -69,8 +69,8 @@ def deploy_contracts():
     import shutil
     forge_path = shutil.which("forge")
     if not forge_path:
-        # Fallback to local user path
-        forge_path = "/Users/Akmal/.foundry/bin/forge"
+        # Fallback for Docker environment
+        forge_path = "/root/.foundry/bin/forge"
 
     cmd = [
         forge_path, "create",
