@@ -12,6 +12,7 @@ from src.risk.slippage_client import SlippageClient
 from src.backtest.prediction_tracker import PredictionTracker
 from src.core.state_store import StateStore
 from src.execution.ml_prediction_service import MLPredictionService
+from src.data.chainlink_client import ChainlinkClient
 import numpy as np
 import random
 import os
@@ -54,6 +55,7 @@ class RebalancerService:
             logger.info("Found local deployment file. Switching to NETWORK=local")
             
         self.ml_service = MLPredictionService(network=network)
+        self.chainlink = ChainlinkClient(self.w3)
         
         # Initialize Layers
         
@@ -168,8 +170,21 @@ class RebalancerService:
             top_idx = np.argmax(weights)
             target_pool = self.last_scanned_pools[top_idx]
 
-        # Prepare Portfolio Context
-        PORTFOLIO_SIZE = float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
+        # --- DYNAMIC CAPITAL LOGIC ---
+        # Fetch live wallet balance to determine real portfolio size
+        try:
+            raw_bal = self.w3.eth.get_balance(self.signer.address)
+            wallet_balance = float(self.w3.from_wei(raw_bal, 'ether'))
+            logger.info(f"WALLET CHECK: {self.signer.address} has {wallet_balance:.4f} ETH")
+        except Exception as e:
+            logger.error(f"Wallet Check Failed: {e}")
+            wallet_balance = 0.0
+
+        # Fetch Live ETH Price from Chainlink
+        eth_price = self.chainlink.get_asset_price('ETH')
+        # If wallet has balance, use it. Otherwise fallback to ENV for safety.
+        PORTFOLIO_SIZE = wallet_balance * eth_price if wallet_balance > 0.01 else float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
+        logger.info(f"DYNAMIC_CAPITAL: Scaling decisions based on ${PORTFOLIO_SIZE:,.2f} total assets (ETH @ ${eth_price:,.2f})")
 
         # Enhanced ML Prediction Audit (Liquidity-Aware)
         ml_audit = self.ml_service.generate_prediction(
@@ -192,18 +207,7 @@ class RebalancerService:
         logger.info(f"Strategy: {target_pool['symbol']} ({target_apy:.2f}%) | Conviction: {weights[top_idx]:.1%}")
 
         # --- REALISM CHECK 1: Are we already in this pool? ---
-        # Prepare Context & Calculations first (Moved up/duplicated for early return)
-        PORTFOLIO_SIZE = float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
         
-        # Live Wallet Tracking
-        try:
-            raw_bal = self.w3.eth.get_balance(self.signer.address)
-            wallet_balance = float(self.w3.from_wei(raw_bal, 'ether'))
-            logger.info(f"💰 WALLET CHECK: {self.signer.address} has {wallet_balance:.4f} ETH")
-        except Exception as e:
-            logger.error(f"❌ Wallet Check Failed: {e}")
-            wallet_balance = 0.0
-
         # Determine metrics even if holding
         # If holding identical pool, costs are technically zero relative to staying
         zero_metrics = {
@@ -220,6 +224,7 @@ class RebalancerService:
             "roi_days": 0.0,
             # Wallet Tracking
             "wallet_balance_eth": wallet_balance,
+            "eth_price": eth_price,
             "last_updated": datetime.utcnow().isoformat()
         }
 
@@ -241,7 +246,7 @@ class RebalancerService:
         # Costs Logic
         gas_price_gwei = self.w3.eth.gas_price / 1e9
         tx_gas_limit = 500000
-        gas_cost_usd = (tx_gas_limit * gas_price_gwei * 1e-9) * 2500
+        gas_cost_usd = (tx_gas_limit * gas_price_gwei * 1e-9) * eth_price
         estimated_slippage = await self.slippage.get_expected_slippage("USDC", "USDT", PORTFOLIO_SIZE)
         total_costs_usd = gas_cost_usd + (PORTFOLIO_SIZE * estimated_slippage)
         monthly_gain_usd = (PORTFOLIO_SIZE * (apy_gain / 100)) / 12
@@ -266,6 +271,7 @@ class RebalancerService:
             "roi_days": break_even_days,
             # Wallet Tracking
             "wallet_balance_eth": wallet_balance,
+            "eth_price": eth_price,
             "last_updated": datetime.utcnow().isoformat()
         }
 
@@ -397,6 +403,11 @@ class RebalancerService:
                 "stability_score": 0.5, # Default
                 "token_correlation": 0.2
             }
+            # Determine Capital (Dynamic from metrics if available)
+            wallet_eth = metrics.get('wallet_balance_eth', 0.0) if metrics else 0.0
+            price_eth = metrics.get('eth_price', 2500.0) if metrics else 2500.0
+            dynamic_capital = wallet_eth * price_eth if wallet_eth > 0.01 else float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
+
             # Call Record Prediction with FULL ARGUMENTS
             self.tracker.record_prediction(
                 prediction_type=prediction_type,
@@ -406,7 +417,7 @@ class RebalancerService:
                 target_pool_apy=target_pool['apy'] if target_pool else 0.0,
                 confidence=float(weights[top_idx]),
                 reason=forced_reason if forced_reason else "Autonomous Update",
-                capital_usd=float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0)),
+                capital_usd=dynamic_capital,
                 market_context={
                     "runner_ups": runner_ups,
                     "target_metadata": target_pool if target_pool else None,

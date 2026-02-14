@@ -69,7 +69,6 @@ try:
         
 except Exception as e:
     st.sidebar.error(f"Wallet Error: {str(e)}")
-st.sidebar.markdown("---")
 
 # --- Test Portfolio Section ---
 st.markdown("###  Active Test Portfolio")
@@ -307,9 +306,13 @@ with tab2:
                     
                     # --- NEW: Financial Performance (User Requested) ---
                     st.markdown("#### 💸 Financial Performance")
-                    fp1, fp2, fp3, fp4 = st.columns(4)
+                    fp0, fp1, fp2, fp3, fp4 = st.columns(5)
                     
                     metrics = ctx.get('metrics', {})
+                    
+                    # 0. Dynamic Managed Capital
+                    capital = p.get('capital_usd', 100000.0)
+                    fp0.metric("Managed Capital", f"${capital:,.0f}", help="Real portfolio size used for AI decision math")
 
                     # 1. Net Gain (APY %) (Moved Up)
                     net_gain = (p.get('target_pool_apy', 0) or 0) - (p.get('current_pool_apy', 0) or 0)
