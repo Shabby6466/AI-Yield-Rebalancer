@@ -110,4 +110,8 @@ def deploy_contracts():
 
 if __name__ == "__main__":
     start_anvil()
-    deploy_contracts()
+    address = deploy_contracts()
+    if not address:
+        print("❌ Deployment failed. Exiting.")
+        sys.exit(1)
+    print("✅ Deployment successful.")
