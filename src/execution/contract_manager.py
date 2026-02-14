@@ -117,7 +117,10 @@ class ContractManager:
                 
                 if address and abi_file:
                     with open(abi_file, 'r') as f:
-                        abi = json.load(f)
+                        artifact = json.load(f)
+                        
+                    # Extract ABI from artifact (Foundry/Hardhat format)
+                    abi = artifact.get('abi', artifact)
                         
                     contract = self.w3.eth.contract(
                         address=self.w3.to_checksum_address(address),

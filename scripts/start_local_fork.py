@@ -94,9 +94,8 @@ def deploy_contracts():
     ]
     
     print(f"Running Forge Command in {contracts_dir}...")
-    print(f"Running Forge Command in {contracts_dir}...")
-    # Direct output to console so we can see it in 'docker compose logs'
-    result = subprocess.run(cmd, cwd=contracts_dir)
+    # Direct output to DEVNULL to clean up logs
+    result = subprocess.run(cmd, cwd=contracts_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     if result.returncode == 0:
         # We need to find the address manually now that we didn't capture output
