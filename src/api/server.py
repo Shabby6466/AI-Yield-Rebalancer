@@ -65,10 +65,12 @@ async def predict_yield_opportunity(request: RebalanceRequest):
     4. Returns decision
     """
     # 1. Detect Current State
-    state = clients['state'].load_state()
-    current_pool_id = state.get("current_pool_id")
-    current_symbol = state.get("current_pool_symbol", "CASH")
-    current_apy = state.get("current_apy", 0.0) / 100
+    # 1. Detect Current State
+    # Simplified for POC: Assume we are starting fresh or get state from DB later
+    current_pool_id = None
+    current_symbol = "CASH"
+    current_apy = 0.0
+
     
     # If the request provides allocations, we can either override or merge
     # For now, if use_system_state is True, we use what the rebalancer service thinks
