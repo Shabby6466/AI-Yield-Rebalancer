@@ -196,18 +196,28 @@ class RebalancerService:
         # 1. Look up the ACTUAL hex address from local DB (replaces UUID)
         pool_uuid = target_pool['pool']
         pool_metadata = self.db.get_pool_metadata(pool_uuid)
+        symbol = target_pool.get('symbol', 'USDC').upper()
+        project = target_pool.get('project', '').lower()
         
-        # Fallback: Some pools are known by symbol in the VERIFIED map
-        pool_address = pool_uuid
+        # 2. Resolve final hex address using DB or Protocol Fallbacks
+        pool_address = pool_uuid # Default to UUID if all fails
+        
         if pool_metadata and pool_metadata.get('pool_address'):
             pool_address = pool_metadata['pool_address']
-        elif target_pool.get('symbol') == 'USP':
-             pool_address = '0x098697Ba3fEE4Ea76294c5d6a466a4E3b3e95fE6' # Direct fallback for USP
+        elif symbol == 'USP':
+            pool_address = '0x098697Ba3fEE4Ea76294c5d6a466a4E3b3e95fE6' 
+        elif 'aave' in project:
+            pool_address = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2' # Aave V3 Pool
+        elif 'compound' in project:
+            pool_address = '0xc3d688B66703497DAA19211EEdff47f25384cdc3' # Compound V3 Comet
+        elif symbol == 'USDC' and pool_address == pool_uuid:
+             # Generically assume Aave if it's the top USDC pool and we have no better info
+             pool_address = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2'
              
         ml_audit = await asyncio.to_thread(
             self.ml_service.generate_prediction,
             pool_address=pool_address, 
-            asset_address=target_pool.get('symbol', 'USDC'),
+            asset_address=symbol,
             portfolio_size_usd=PORTFOLIO_SIZE
         )
         if not ml_audit or not ml_audit.get('success', False):
