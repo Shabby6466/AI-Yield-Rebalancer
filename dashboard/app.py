@@ -277,9 +277,11 @@ with tab2:
                     roi_val = metrics.get('roi_days')
                     
                     if roi_val is None:
-                         roi_str = "N/A" # Legacy data
-                    elif roi_val == float('inf') or roi_val > 3650:
-                         roi_str = "Never"
+                         roi_str = "N/A" 
+                    elif roi_val == float('inf'):
+                         roi_str = "Loss" if net_gain < 0 else "Infinite"
+                    elif roi_val > 3650:
+                         roi_str = "> 10 Years"
                     else:
                          roi_str = f"{roi_val:.1f} Days"
                          
