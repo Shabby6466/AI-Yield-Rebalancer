@@ -203,6 +203,22 @@ class RebalancerService:
         # Calculate Break-Even
         break_even_days = (total_costs_usd / (monthly_gain_usd / 30)) if monthly_gain_usd > 0 else float('inf')
 
+        # Bundle Metrics for XAI
+        financial_metrics = {
+            "gas_cost_usd": gas_cost_usd,
+            "estimated_slippage": estimated_slippage,
+            "total_costs_usd": total_costs_usd,
+            "monthly_gain_usd": monthly_gain_usd,
+            "net_profit_usd": net_profit_usd,
+            "break_even_days": break_even_days,
+            # Map to dashboard keys
+            "gas_exit": gas_cost_usd / 2, # Approximation
+            "gas_enter": gas_cost_usd / 2,
+            "swap_fees": PORTFOLIO_SIZE * estimated_slippage,
+            "total_conversion_loss": total_costs_usd,
+            "roi_days": break_even_days
+        }
+
         # Phase 1: The Opportunity Gap
         p1_msg = f"🔍 Phase 1: Detecting Opportunity Gap...\n- Current: {self.current_pool_symbol} ({self.current_apy:.2f}% APY)\n- Target: {target_pool['symbol']} ({target_apy:.2f}% APY)\n- Gap: {apy_gain:.2f}% yield differential"
         logger.info(p1_msg)
@@ -224,7 +240,7 @@ class RebalancerService:
             await self._record_cycle_prediction(weights, latest_features, forced_type="HOLD", 
                                         forced_reason=f"[HOLD_PROFIT_GUARD] {reason} (Net: ${net_profit_usd:.2f})",
                                         target_pool=target_pool, safety_report=safety_report,
-                                        ml_audit=ml_audit)
+                                        ml_audit=ml_audit, metrics=financial_metrics)
             return
 
         logger.info(f"✅ Verdict: GO! Triggering Atomic Rebalance...")
@@ -242,7 +258,7 @@ class RebalancerService:
             await self._record_cycle_prediction(weights, latest_features, forced_type="HOLD", 
                                         forced_reason="[HOLD_STRATEGY_IDLE] Position is optimal",
                                         target_pool=target_pool, safety_report=safety_report,
-                                        ml_audit=ml_audit)
+                                        ml_audit=ml_audit, metrics=financial_metrics)
             return
 
         # Check slippage (Simulated but high-fidelity for Phase 3)
@@ -252,7 +268,7 @@ class RebalancerService:
             await self._record_cycle_prediction(weights, latest_features, forced_type="ABORTED", 
                                         forced_reason=f"[ABORT_SLIPPAGE_HIGH] Slippage {estimated_slippage:.2%}",
                                         target_pool=target_pool, safety_report=safety_report,
-                                        ml_audit=ml_audit)
+                                        ml_audit=ml_audit, metrics=financial_metrics)
             return
             
         # 5. Layer 4: Execution
@@ -285,7 +301,8 @@ class RebalancerService:
                                         target_pool=target_pool, safety_report=safety_report,
                                         override_current_symbol=prev_symbol,
                                         override_current_apy=prev_apy,
-                                        override_current_id=prev_id)
+                                        override_current_id=prev_id,
+                                        metrics=financial_metrics)
         else:
             logger.error("❌ Phase 3 FAILED: Flashbots bundle rejected.")
             self.phase_logs.append("❌ Phase 3 FAILED: Flashbots bundle rejected.")
@@ -301,7 +318,8 @@ class RebalancerService:
                 market_context={
                     "target_pool": target_pool,
                     "safety_report": safety_report,
-                    "current_pool_symbol": self.current_pool_symbol
+                    "current_pool_symbol": self.current_pool_symbol,
+                    "metrics": financial_metrics
                 }
             )
 
@@ -311,76 +329,24 @@ class RebalancerService:
                                  override_current_symbol: str = None,
                                  ml_audit: Dict = None,
                                  override_current_apy: float = None,
-                                 override_current_id: str = None):
+                                 override_current_id: str = None,
+                                 metrics: Dict = None):
         """Log the cycle's decision to both SQLite (Dashboard) and PostgreSQL (Audit Trail)."""
         try:
-            top_idx = np.argmax(weights)
-            prediction_type = forced_type or ("REBALANCE" if weights[top_idx] > 0.5 else "HOLD")
-            reason = forced_reason or f"Risk Tolerance: {self.risk_tolerance}, Top Allocation: {weights[top_idx]:.2%}"
-            
-            # Determine current state for logging
-            actual_current_id = override_current_id if override_current_id is not None else (self.current_pool_id or "none")
-            actual_current_apy = override_current_apy if override_current_apy is not None else (self.current_apy or 0.0)
-            actual_current_symbol = override_current_symbol if override_current_symbol is not None else (self.current_pool_symbol or "CASH")
-            
-            # --- FIX: GHOST CASH RESOLUTION ---
-            # If the system thinks it's in 'CASH' but has a real ID, resolve it from the latest market scan
-            if actual_current_symbol == "CASH" and actual_current_id != "none":
-                match = next((p for p in self.last_scanned_pools if p['pool'] == actual_current_id), None)
-                if match:
-                    actual_current_symbol = match['symbol']
-                    # Also sync APY if it was missing
-                    if actual_current_apy == 0:
-                        actual_current_apy = match['apy']
-
-            # 1. NEW: Explainable AI (XAI) - Extract from ML Audit
-            # Using actual inference factors from the LSTM prediction if available
-            cb = {
-                "yield_momentum": round(0.5 + random.uniform(-0.1, 0.1), 2),
-                "stability_score": round(0.5 + random.uniform(-0.1, 0.1), 2),
-                "token_correlation": round(0.2 + random.uniform(-0.05, 0.05), 2),
-                "liquidity_health": 0.9 if not ml_audit or not ml_audit.get('liquidity_toxic') else 0.1
-            }
-            
-            # If we had attention weights, we'd map them here
-            # For now, we simulate XAI with high-fidelity derivation
-            confidence_breakdown = cb
-
-            # Create market context (top 3 runner ups)
-            sorted_indices = np.argsort(weights)[::-1]
-            runner_ups = []
-            for idx in sorted_indices[1:4]:
-                if idx < len(self.last_scanned_pools):
-                    pool = self.last_scanned_pools[idx]
-                    runner_ups.append({
-                        "symbol": pool['symbol'],
-                        "apy": pool['apy'],
-                        "tvl": pool['tvlUsd'],
-                        "confidence": float(weights[idx])
-                    })
-
-            # Integrated Confidence: Neural conviction weighted by Momentum and Stability
-            # This makes the UI "Confidence" dynamic and reflective of the inference factors
-            integrated_confidence = float(weights[top_idx]) * (0.8 + (cb['yield_momentum'] * 0.2) + (cb['stability_score'] * 0.1))
-            integrated_confidence = max(0.1, min(0.99, integrated_confidence))
-
+# ... (rest of function) ...
             self.tracker.record_prediction(
                 prediction_type=prediction_type,
-                current_pool_id=actual_current_id,
-                current_pool_apy=actual_current_apy,
-                target_pool_id=target_pool['pool'] if target_pool else f"pool_{top_idx}",
-                target_pool_apy=target_pool['apy'] if target_pool else float(features[top_idx, 0]),
-                confidence=integrated_confidence,
-                reason=reason,
-                capital_usd=100000.0,
+# ...
                 market_context={
                     "runner_ups": runner_ups,
                     "target_metadata": target_pool if target_pool else None,
                     "current_pool_symbol": actual_current_symbol,
                     "safety_report": safety_report,
                     "confidence_breakdown": confidence_breakdown,
-                    "phase_logs": self.phase_logs
+                    "phase_logs": self.phase_logs,
+                    "metrics": metrics
                 },
+# ...
                 volatility_score=float(np.std(features[:, 0])),
                 predicted_apy=target_pool['apy'] if target_pool else float(features[top_idx, 0]),
                 gas_cost=safety_report.get('gas_price', 0) if safety_report else 0
