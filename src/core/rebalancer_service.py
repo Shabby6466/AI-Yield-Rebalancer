@@ -16,6 +16,7 @@ from src.data.chainlink_client import ChainlinkClient
 from src.data.timeseries_db import TimeseriesDB
 import numpy as np
 import random
+import os
 from datetime import datetime
 from dotenv import load_dotenv
 from decimal import Decimal, getcontext
