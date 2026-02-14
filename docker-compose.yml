@@ -115,6 +115,7 @@ services:
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
       - BRAIN_API_HOST=brain
     volumes:
+      - .:/app
       - ./data:/app/data
       - ./contracts:/app/contracts
       - ./models:/app/models
