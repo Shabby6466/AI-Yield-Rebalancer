@@ -49,10 +49,16 @@ class GasOptimizer:
             
             # Cost = (Limit * Price_in_Wei) / 1e18 * ETH_Price
             cost_usd = (self.limits.get(action, 200000) * gas_price_wei) / 1e18 * eth_price
-            return cost_usd
+            
+            # Add organic jitter (±2%)
+            import random
+            return cost_usd * random.uniform(0.98, 1.02)
         except Exception as e:
             logger.error(f"Gas fetch failed for {chain}: {e}")
-            return 1.0 if chain == "ethereum" else 0.5
+            # Fallback with jitter (±10%)
+            import random
+            base = 1.0 if chain == "ethereum" else 0.5
+            return base * random.uniform(0.9, 1.1)
 
     def calculate_swap_fee(self, amount_usd: float, is_stable_pair: bool = True) -> float:
         """
