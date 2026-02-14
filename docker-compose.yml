@@ -62,12 +62,14 @@ services:
         python3 scripts/start_local_fork.py &&
         echo '📊 Phase 1.5: Seeding Database...' &&
         python3 src/scheduler/collector.py --once &&
-        echo '🧠 Phase 2: Starting AI Server & Rebalancer Loop...' &&
+        echo '🧠 Phase 2: Starting Full AI Stack (Server + Agent + Collector)...' &&
         export PYTHONPATH=/app &&
-        # Start API Server in background
+        # 1. Start API Server (Background)
         uvicorn src.api.server:app --host 0.0.0.0 --port 8000 &
-        # Start Rebalancer Loop in background
-        python3 src.scheduler.rebalancer_loop.py &
+        # 2. Start Data Collector Loop (Background)
+        python3 src/scheduler/collector.py &
+        # 3. Start Rebalancer Agent Loop (Background)
+        python3 src/scheduler/rebalancer_loop.py &
         wait
       "
 
