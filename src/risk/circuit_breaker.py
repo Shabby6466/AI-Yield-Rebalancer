@@ -18,31 +18,43 @@ class CircuitBreaker:
     3. High Gas/Congestion (Pause rebalancing)
     """
     
-    def __init__(self, w3: Web3, strategy_hub_address: str):
+    def __init__(self, w3: Web3, strategy_hub_address: str, ml_service=None):
         self.w3 = w3
         self.strategy_hub_address = strategy_hub_address
+        self.ml_service = ml_service
         self.is_paused = False
         
         # Thresholds
         self.PEG_THRESHOLD = 0.98
         self.TVL_DROP_THRESHOLD = 0.20
-        
-    def check_market_health(self) -> bool:
+    
+    def get_safety_report(self) -> Dict:
+        """Fetch current metrics for the safety verifier."""
+        # Simulated metrics for POC
+        gas_price = self.w3.eth.gas_price / 10**9 # Gwei
+        return {
+            "gas_price": round(gas_price, 2),
+            "gas_limit": 50, # Example threshold
+        }
+
+    def check_market_health(self) -> tuple[bool, Dict]:
         """
         Main loop for health checks.
-        Returns True if system is healthy, False if emergency action is needed.
+        Returns (is_healthy, report).
         """
-        # 1. Check Stablecoin Pegs
-        if not self._check_pegs():
-            self._trigger_emergency_withdrawal("Stablecoin De-peg Detected")
-            return False
+        report = self.get_safety_report()
+        
+        # 1. Check Stablecoin Pegs (If data available)
+        if 'usdc_peg' in report and report['usdc_peg'] < self.PEG_THRESHOLD:
+            self._trigger_emergency_withdrawal(f"Stablecoin De-peg Detected: ${report['usdc_peg']}")
+            return False, report
             
-        # 2. Check Protocol TVL Stability
-        if not self._check_tvl_drift():
+        # 2. Check Protocol TVL Stability (If data available)
+        if 'tvl_drift' in report and report['tvl_drift'] > self.TVL_DROP_THRESHOLD:
             self._trigger_emergency_withdrawal("Massive TVL Outflow Detected")
-            return False
+            return False, report
             
-        return True
+        return True, report
 
     def _check_pegs(self) -> bool:
         """Integration with Chainlink to verify USDC/DAI/USDT stays near $1."""

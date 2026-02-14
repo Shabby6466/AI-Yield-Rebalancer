@@ -64,11 +64,22 @@ async def predict_yield_opportunity(request: RebalanceRequest):
     3. Checks Gas Optimization
     4. Returns decision
     """
-    logger.info(f"Analyzing portfolio: {request.portfolio_id}")
+    # 1. Detect Current State
+    state = clients['state'].load_state()
+    current_pool_id = state.get("current_pool_id")
+    current_symbol = state.get("current_pool_symbol", "CASH")
+    current_apy = state.get("current_apy", 0.0) / 100
     
-    # 1. Fetch Real Data
-    pool_ids = list(request.current_allocations.keys())
-    live_pools = await clients['defillama'].fetch_pool_yields(pool_ids)
+    # If the request provides allocations, we can either override or merge
+    # For now, if use_system_state is True, we use what the rebalancer service thinks
+    if not current_pool_id and request.current_allocations:
+        current_pool_id = list(request.current_allocations.keys())[0]
+
+    logger.info(f"Analyzing portfolio for: {current_symbol}")
+    
+    # 2. Fetch Real Data
+    # In practice, we'd fetch all 200+ pools, then filter
+    live_pools = await clients['defillama'].fetch_top_pools(limit=50)
     
     if not live_pools:
         raise HTTPException(status_code=404, detail="Pool data not found")
@@ -76,15 +87,14 @@ async def predict_yield_opportunity(request: RebalanceRequest):
     # Simplify: Assess the largest position first
     # In a real system, we'd optimize the full portfolio vector
     best_pool = max(live_pools, key=lambda p: p.get('apy', 0))
-    current_pool_id = pool_ids[0] # Assume single-asset strategy for MVP
+    # Find current pool in the scan to get its LATEST APY
     current_pool = next((p for p in live_pools if p['pool'] == current_pool_id), None)
     
-    if not current_pool:
-         raise HTTPException(status_code=404, detail="Current pool data not found")
-
-    current_apy = current_pool['apy'] / 100
+    if current_pool:
+        current_apy = current_pool['apy'] / 100
+    
     new_apy = best_pool['apy'] / 100
-    capital_usd = sum(request.current_allocations.values())
+    capital_usd = sum(request.current_allocations.values()) if request.current_allocations else 100000.0
     
     logger.info(f"Market Scan: Current APY {current_apy:.2%} -> Best APY {new_apy:.2%} ({best_pool['symbol']})")
     
@@ -142,13 +152,19 @@ async def predict_yield_opportunity(request: RebalanceRequest):
             if cost_breakdown.get('monthly_gain', 0) > 0 else 999
         )
 
+    market_context = {
+        "runner_ups": [{"symbol": p['symbol'], "apy": p['apy'], "tvl": p['tvlUsd']} for p in live_pools[:3]],
+        "target_metadata": best_pool,
+        "current_pool_symbol": current_symbol
+    }
+
+    market_context = {
+        "runner_ups": [{"symbol": p['symbol'], "apy": p['apy'], "tvl": p['tvlUsd']} for p in live_pools[:3]],
+        "target_metadata": best_pool,
+        "current_pool_symbol": current_symbol
+    }
+
     if not is_profitable:
-        # Record prediction
-        clients['tracker'].record_prediction(
-            "HOLD", current_pool_id, current_apy*100,
-            best_pool['pool'], new_apy*100, 0.5,
-            f"High migration costs (${total_cost:.2f})", capital_usd
-        )
         return {
             "action": "HOLD",
             "target_allocations": request.current_allocations,
@@ -156,15 +172,10 @@ async def predict_yield_opportunity(request: RebalanceRequest):
             "reason": f"High migration costs (${total_cost:.2f}) vs monthly gain (${cost_breakdown.get('monthly_gain', 0):.2f}).",
             "estimated_gas": total_cost,
             "net_apy_gain": (new_apy - current_apy),
-            "metrics": cost_breakdown
+            "metrics": cost_breakdown,
+            "market_context": market_context # Return for UI but don't save to DB
         }
 
-    # Record prediction
-    clients['tracker'].record_prediction(
-        "REBALANCE", current_pool_id, current_apy*100,
-        best_pool['pool'], new_apy*100, 0.95,
-        f"Valid opportunity: +{new_apy-current_apy:.2%} APY gain", capital_usd
-    )
     # If all pass -> REBALANCE
     return {
         "action": "REBALANCE",
@@ -173,7 +184,8 @@ async def predict_yield_opportunity(request: RebalanceRequest):
         "reason": f"Valid opportunity: +{new_apy-current_apy:.2%} APY gain. Safe & Profitable.",
         "estimated_gas": total_cost,
         "net_apy_gain": (new_apy - current_apy),
-        "metrics": cost_breakdown
+        "metrics": cost_breakdown,
+        "market_context": market_context
     }
 
 @app.post("/admin/rebalance")

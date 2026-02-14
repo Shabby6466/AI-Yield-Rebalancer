@@ -7,12 +7,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+RPC_URL = os.getenv("RPC_URL", "http://localhost:8545")
 ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY")
 
 def is_node_running():
     try:
         response = requests.post(
-            "http://localhost:8545",
+            RPC_URL,
             json={"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
             timeout=1
         )
@@ -22,15 +23,21 @@ def is_node_running():
 
 def start_anvil():
     if is_node_running():
-        print("Node already running on 8545.")
+        print(f"Node already running on {RPC_URL}.")
         return
     
+    # Try to find anvil in PATH
+    import shutil
+    anvil_path = shutil.which("anvil")
+    if not anvil_path:
+        # Fallback to local user path
+        anvil_path = "/Users/Akmal/.foundry/bin/anvil"
+
     print(f"Starting Anvil fork of mainnet...")
-    # Using a public RPC if Alchemy key is missing, but preferably use Alchemy
     fork_url = f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}" if ALCHEMY_API_KEY else "https://eth.drpc.org"
     
     cmd = [
-        "/Users/Akmal/.foundry/bin/anvil",
+        anvil_path,
         "--fork-url", fork_url,
         "--port", "8545"
     ]
@@ -58,10 +65,17 @@ def deploy_contracts():
     # Private key from Anvil's first default account
     PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
     
+    # Try to find forge in PATH
+    import shutil
+    forge_path = shutil.which("forge")
+    if not forge_path:
+        # Fallback to local user path
+        forge_path = "/Users/Akmal/.foundry/bin/forge"
+
     cmd = [
-        "/Users/Akmal/.foundry/bin/forge", "create",
+        forge_path, "create",
         "src/StrategyHub.sol:StrategyHub",
-        "--rpc-url", "http://localhost:8545",
+        "--rpc-url", RPC_URL,
         "--private-key", PK,
         "--constructor-args", USDC, AAVE_POOL, AUSDC, COMPOUND_COMET
     ]

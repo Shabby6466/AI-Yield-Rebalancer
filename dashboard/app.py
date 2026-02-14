@@ -11,8 +11,14 @@ from src.optimizer.trade_sizer import TradeSizer
 from src.backtest.prediction_tracker import PredictionTracker
 from src.execution.sim_control import SimController
 from web3 import Web3
+from eth_account import Account
 import json
 import os
+from streamlit_autorefresh import st_autorefresh
+
+# Auto-refresh the page every 30 seconds to keep stats live without manual refresh
+# This helps in monitoring the rebalancer's logs and predictions in real-time.
+st_autorefresh(interval=30 * 1000, key="datarefresh")
 
 st.set_page_config(page_title="AI Yield Brain - Live Status", layout="wide")
 
@@ -150,26 +156,7 @@ def get_apy_history(pool_id):
 
 # --- Sidebar Scanner ---
 with st.sidebar:
-    st.markdown("### Market Scanner")
-    st.markdown("Top Stablecoin Yields (ETH/Base)")
     
-    # Read from DB — instant
-    try:
-        db = TimeseriesDB()
-        top_db_pools = db.get_latest_yields(
-            stablecoin_only=True, chains=['Ethereum', 'Base'],
-            min_tvl=1_000_000
-        )[:5]
-        
-        if top_db_pools:
-            for p in top_db_pools:
-                st.markdown(f"**{p['symbol']}** ({p['protocol'].title()})")
-                st.caption(f"**{p['apy']:.2f}%** | TVL: ${p['tvl_usd']/1e6:.1f}M")
-                st.divider()
-        else:
-            st.info("No data yet.")
-    except Exception:
-        st.caption("Scanner offline")
     
     # Refresh button
     st.markdown("---")
@@ -179,6 +166,7 @@ with st.sidebar:
             result = subprocess.run(
                 [sys.executable, "-m", "src.scheduler.collector", "--once"],
                 capture_output=True, text=True, timeout=30,
+                stdin=subprocess.DEVNULL,
                 cwd="/Users/Akmal/Desktop/projects/defi rebalancing/AI-Yield-Rebalancer"
             )
             if result.returncode == 0:
@@ -192,20 +180,28 @@ with st.sidebar:
         st.caption(f"Last update: {last_ts} UTC")
 
 # --- Tabs Layout ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    " Live Decision", 
-    " Deep Dive Analytics", 
-    " Portfolio Composition", 
-    " Strategy Backtest", 
-    " 📡 Live Stability Test",
-    " On-Chain Fork", 
-    " Sim Sandbox"
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🧠 AI Decision Engine", 
+    "📡 Autonomous Monitor",
+    "📈 Analysis & Backtest", 
+    "🧪 Simulation Lab"
 ])
 
-with tab5:
-    st.markdown("### 📡 Live Stability Test Monitor")
+with tab2:
+    with st.expander("ℹ️ How it works: Autonomous Monitor"):
+        st.markdown("""
+        **What it is:** The real-time operations center for the AI Yield Rebalancer service. 
+        **How it works:** 
+        1. **Live Feed:** Directly tails the `rebalancer.log` to show you exactly what the AI is thinking *right now*.
+        2. **Atomic Lifecycle Log:** Every decision (SUCCESS, HOLD, or ABORT) is recorded with a 4-phase audit trail:
+           - 🔍 **Phase 1 (Opportunity Gap):** Identifying yield differentials in the market.
+           - 📊 **Phase 2 (Go/No-Go):** Calculating gas, slippage, and ROI to ensure profitability.
+           - ⚡ **Phase 3 (Atomic Execution):** The Flashbots/Anvil transaction sequence.
+           - 💓 **Phase 4 (Monitoring):** Post-execution health checks and trend tracking.
+        """)
+    st.markdown("### 📡 Autonomous Rebalancer Monitor")
     st.caption("Real-time monitoring of the autonomous rebalancer service during the long-duration test.")
-    
+
     try:
         tracker = PredictionTracker()
         accuracy = tracker.get_accuracy_stats()
@@ -213,37 +209,130 @@ with tab5:
         # Dashboard Overview
         lc1, lc2, lc3, lc4 = st.columns(4)
         lc1.metric("Cycles Processed", accuracy['total_predictions'])
-        lc2.metric("Latest Decision", "Hold" if accuracy['total_predictions'] == 0 else tracker.get_all_predictions(1)[0]['prediction_type'])
+        
+        # Get latest for status
+        latest_preds = tracker.get_all_predictions(limit=1)
+        latest_status = latest_preds[0]['prediction_type'] if latest_preds else "Idle"
+        lc2.metric("Latest Status", latest_status)
+        
         lc3.metric("System Uptime", "Active")
-        lc4.metric("Risk Profile", os.getenv("RISK_TOLERANCE", "1.0"))
+        lc4.metric("Accuracy (7d)", f"{accuracy['accuracy_pct']}%")
 
         # Prediction Feed
-        st.markdown("#### Decision Feed (Latest First)")
-        preds = tracker.get_all_predictions(limit=10)
+        st.markdown("#### Autonomous Decision Feed")
+        preds = tracker.get_all_predictions(limit=15)
         
         if preds:
             for p in preds:
-                with st.expander(f"Cycle {p['id']} - {p['timestamp'][11:16]} - {p['prediction_type']}"):
-                    fc1, fc2, fc3 = st.columns(3)
-                    fc1.write(f"**Confidence:** {p['confidence']*100:.1f}%")
-                    fc2.write(f"**Target APY:** {p['target_pool_apy']:.2f}%")
-                    fc3.write(f"**Status:** {p['prediction_type']}")
-                    st.write(f"**Reason:** {p['reason']}")
+                status = p['prediction_type']
+                icon = "🟡" # Default Hold
+                if status in ["REBALANCE", "SUCCESS"]: icon = "🟢"
+                elif status == "ABORTED": icon = "🔴"
+                
+                with st.expander(f"{icon} Cycle {p.get('id', 0)} - {p['timestamp'][11:16]} - {status}"):
+                    # Parse Market Context
+                    ctx = {}
+                    try:
+                        if p.get('market_context'):
+                            ctx = json.loads(p['market_context'])
+                    except: pass
+
+                    # Fix logical ghost: Use context's current_pool_symbol
+                    cur_sym = ctx.get('current_pool_symbol', 'CASH')
+
+                    # Row 1: Dashboard Overlays
+                    st.markdown(f"#### 🧠 Brain Intelligence (Confidence: {p.get('confidence',0)*100:.1f}%)")
+                    c1, c2, c3 = st.columns(3)
+                    
+                    # A. Inference Factors
+                    with c1:
+                        st.markdown("**Inference Factors**")
+                        cb = ctx.get('confidence_breakdown', {})
+                        st.caption(f"📈 Yield Momentum: {cb.get('yield_momentum', 0.5):.2f}")
+                        st.caption(f"🛡️ Stability Score: {cb.get('stability_score', 0.5):.2f}")
+                        st.caption(f"🔗 Correlation: {cb.get('token_correlation', 0.2):.2f}")
+                    
+                  
+                    # C. Market Depth
+                    with c2:
+                        st.markdown("**Market Depth**")
+                        tm = ctx.get('target_metadata', {})
+                        st.caption(f"💰 TVL: ${tm.get('tvlUsd',0)/1e6:.1f}M")
+                        st.caption(f"🔄 Route: 1inch Aggregator")
+
+                    st.divider()
+
+                    # Row 2: Comparison Matrix
+                    st.markdown("#### ⚖️ Comparison Matrix")
+                    mc1, mc2, mc3 = st.columns(3)
+                    
+                    # Current
+                    mc1.markdown(f"**Current: {cur_sym}**")
+                    mc1.write(f"APY: {(p.get('current_pool_apy', 0) or 0):.2f}%")
+                    
+                    # Target
+                    target_meta = ctx.get('target_metadata', {})
+                    target_symbol = target_meta.get('symbol', 'Unknown')
+                    mc2.markdown(f"**Target: {target_symbol}**")
+                    mc2.write(f"APY: {(p.get('target_pool_apy', 0) or 0):.2f}%")
+
+                    # Phase Log
+                    if ctx.get('phase_logs'):
+                        st.divider()
+                        st.markdown("#### 📜 Atomic Lifecycle Log")
+                        for log in ctx['phase_logs']:
+                            # Style based on phase emoji
+                            if "🔍" in log: st.info(log)
+                            elif "📊" in log: st.warning(log)
+                            elif "⚡" in log: st.success(log)
+                            elif "💓" in log: st.info(log)
+                            else: st.write(log)
+                    
+                    # Delta
+                    t_apy = p.get('target_pool_apy', 0) or 0
+                    c_apy = p.get('current_pool_apy', 0) or 0
+                    gain = t_apy - c_apy
+                    gas_cost = p.get('gas_cost', 0) or 0
+                    mc3.markdown(f"**The Delta**")
+                    mc3.write(f"Net Gain: :green[+{gain:.2f}% APY]")
+                    st.caption(f"Profit Velocity: :blue[+${((p.get('capital_usd',100000) or 100000) * gain/100/12):.0f}/mo]")
+
+                    # Detailed Analysis Charts
+                    if st.checkbox(f"View Graphs for Cycle {p.get('id', 0)}", key=f"analysis_{p.get('id', 0)}"):
+                        dc1, dc2 = st.columns(2)
+                        
+                        # A. Runner Ups Table
+                        with dc1:
+                            st.markdown("##### 🏁 Runner-Ups")
+                            runners = ctx.get('runner_ups', [])
+                            if runners:
+                                st.dataframe(pd.DataFrame(runners), use_container_width=True, hide_index=True)
+
+                        # B. Gas Efficiency Meter
+                        with dc2:
+                            st.markdown("##### ⛽ Efficiency")
+                            monthly_profit = ((p.get('capital_usd',100000) or 100000) * (gain/100) / 12)
+                            if monthly_profit > 0:
+                                efficiency = (gas_cost / monthly_profit) * 100
+                                if efficiency < 5: st.success(f"Gas Impact: {efficiency:.1f}%")
+                                elif efficiency < 15: st.warning(f"Gas Impact: {efficiency:.1f}%")
+                                else: st.error(f"Gas Impact: {efficiency:.1f}%")
+
+                    st.info(f"**Reason:** {p['reason']}")
         else:
-            st.info("Waiting for the first autonomous cycle to complete... (Updates every 10 mins)")
+            st.info("Waiting for the first autonomous cycle to complete...")
             
         # Live Log Simulation
         st.markdown("#### Rebalancer Service Logs")
-        if st.checkbox("Show Logs", value=True):
+        if st.checkbox("Show Detailed Logs", value=True):
             log_path = "data/rebalancer.log"
             if os.path.exists(log_path):
                 with open(log_path, "r") as f:
-                    # Read last 50 lines
                     lines = f.readlines()
                     tail = "".join(lines[-50:])
                     st.code(tail)
             else:
-                st.info("Log file not found yet. It will be created when the next cycle starts.")
+                st.info("Log file not found yet.")
             
             if st.button("🔄 Refresh Logs"):
                 st.rerun()
@@ -252,7 +341,15 @@ with tab5:
         st.error(f"Failed to load stability test data: {e}")
 
 with tab1:
-    st.markdown("### AI Brain Decision")
+    with st.expander("ℹ️ How it works: AI Decision Engine"):
+        st.markdown("""
+        **What it is:** A high-fidelity sandbox for manual asset comparison and strategy validation.
+        **How it works:**
+        1. **Live Inference:** Select any two assets to trigger a real-time call to the AI Inference Engine.
+        2. **Risk Scrutiny:** The AI runs a 'Risk Scorecard' analyzing 30-day volatility, Sharpe Ratios, and Yield Decay.
+        3. **Cost Sensitivity:** It calculates a full 'ROI Break-even' period by factoring in live Gas prices and expected Slippage for your specific portfolio size.
+        4. **Multi-Pool Sizing:** Use the **Trade Sizer** tool to calculate a diversified allocation (Max Pools / Max Cap) to minimize single-protocol risk.
+        """)
     
     if st.button(" Ask Brain for Decision", type="primary"):
         with st.spinner("Analyzing market data, risk models, and gas costs..."):
@@ -405,7 +502,9 @@ with tab1:
             else:
                 st.warning("Historical data not available for one or both assets.")
 
-with tab3:
+
+    st.divider()
+    st.markdown("### Portfolio Details")
     st.markdown("### Portfolio Allocations")
     
     # Current single-pool allocation
@@ -492,7 +591,16 @@ with tab3:
             except Exception as e:
                 st.error(f"Sizing failed: {e}")
 
-with tab4:
+with tab3:
+    with st.expander("ℹ️ How it works: Analysis & Backtest"):
+        st.markdown("""
+        **What it is:** A historical validation engine for the rebalancing strategy.
+        **How it works:**
+        1. **Historical Replay:** We take 30-365 days of actual DeFiLlama yield data and run our rebalancing logic against every daily timestamp.
+        2. **Friction Simulation:** Every historical trade includes simulated Gas costs and slippage based on that day's market conditions.
+        3. **Performance Metrics:** Calculates the 'Sharpe Ratio' (risk-adjusted return) and 'Max Drawdown' to prove that the AI would have outperformed a simple 'Buy & Hold' strategy.
+        4. **Accuracy Tracking:** The **AI Prediction Accuracy** section tracks every *real* decision made by the service and cross-references it with 24-hour outcomes.
+        """)
     st.markdown("### Strategy Backtest")
     st.caption("Simulate how the AI rebalancing strategy would have performed on historical data.")
     
@@ -595,7 +703,7 @@ with tab4:
     # --- Prediction Accuracy ---
     st.markdown("---")
     st.markdown("### AI Prediction Accuracy")
-    st.caption("Tracks every Brain decision and validates against actual outcomes.")
+    st.caption("Tracks every Brain decision and validates against actual outcomes after 24 hours.")
     
     try:
         tracker = PredictionTracker()
@@ -638,10 +746,20 @@ with tab4:
         st.info("Prediction tracker initializing...")
 
 # --- Tab 5: On-Chain Fork ---
-with tab5:
+with tab4:
+    with st.expander("ℹ️ How it works: Simulation Lab"):
+        st.markdown("""
+        **What it is:** An on-chain 'Safe Zone' for testing aggressive trades before they hit mainnet.
+        **How it works:**
+        1. **Mainnet Forking:** Uses Anvil to create a local mirror of the Ethereum blockchain.
+        2. **Time Warping:** Allows you to 'Fast Forward' time by days or weeks to see how much interest the StrategyHub contract actually accrues.
+        3. **Black Swan Mocking:** You can manually trigger 'Emergency Withdrawals' or simulate market crashes to see how the AI handles risk triggers.
+        4. **Asset Snapshots:** Capture the state of the system, run a risky test, and then instantly 'Revert' if it fails—zero real capital lost.
+        """)
     st.markdown("###  Local Mainnet Fork Status")
     
-    w3 = Web3(Web3.HTTPProvider("http://localhost:8545"))
+    rpc_url = os.getenv("RPC_URL", "http://localhost:8545")
+    w3 = Web3(Web3.HTTPProvider(rpc_url))
     node_online = False
     try:
         node_online = w3.is_connected()
@@ -653,7 +771,7 @@ with tab5:
         if st.button("🚀 Start Local Fork & Deploy Strategy"):
             with st.spinner("Starting Anvil and deploying contracts..."):
                 import subprocess
-                subprocess.run(["python", "scripts/start_local_fork.py"], check=True)
+                subprocess.run([sys.executable, "scripts/start_local_fork.py"], check=True, stdin=subprocess.DEVNULL)
                 st.success("Fork started and StrategyHub deployed!")
                 st.rerun()
     else:
@@ -727,7 +845,7 @@ with tab5:
             st.info("Fork is running but StrategyHub is not deployed. Restart the fork to redeploy.")
 
 # --- Tab 6: Simulation Sandbox ---
-with tab6:
+
     st.markdown("### 🧪 On-Chain Simulation Sandbox (Anvil)")
     
     if node_online:
@@ -794,20 +912,4 @@ with tab6:
         st.warning("Simulation sandbox requires Local Fork to be online.")
 
 
-# --- Market Data Section ---
-st.markdown("---")
-st.markdown("### Stored Market Data")
-try:
-    db = TimeseriesDB()
-    market_pools = db.get_latest_yields(stablecoin_only=True, chains=['Ethereum', 'Base'], min_tvl=1_000_000)
-    if market_pools:
-        df = pd.DataFrame(market_pools[:20])  # Top 20
-        display_df = df[['symbol', 'protocol', 'chain', 'apy', 'tvl_usd']].copy()
-        display_df.columns = ['Symbol', 'Protocol', 'Chain', 'APY', 'TVL']
-        display_df['APY'] = display_df['APY'].apply(lambda x: f"{x:.2f}%")
-        display_df['TVL'] = display_df['TVL'].apply(lambda x: f"${x:,.0f}")
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No data. Click 'Refresh Pool Data' in the sidebar.")
-except Exception:
-    pass
+

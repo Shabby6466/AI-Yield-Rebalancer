@@ -1,0 +1,37 @@
+
+# AI Yield Rebalancer - Unified Dockerfile
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    libpq-dev \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Foundry (Anvil/Forge) for the Simulation Lab
+RUN curl -L https://foundry.paradigm.xyz | bash
+ENV PATH="/root/.foundry/bin:${PATH}"
+RUN foundryup
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirement files and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source code
+COPY . .
+
+# Ensure data directory exists and has correct permissions
+RUN mkdir -p data/db data/logs contracts
+RUN chmod -R 777 data contracts
+
+# Expose ports
+EXPOSE 8501 8000 8545 5432
+
+# Default command
+CMD ["streamlit", "run", "dashboard/app.py"]

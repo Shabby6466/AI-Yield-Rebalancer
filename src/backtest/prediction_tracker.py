@@ -43,13 +43,19 @@ class Prediction:
     actual_target_apy: Optional[float] = None
     was_correct: Optional[bool] = None
     profit_if_followed: Optional[float] = None  # $ profit/loss if advice was followed
+    # Market Context & Metrics for Deep Dive
+    market_context: Optional[str] = None # JSON string of top pools considered
+    gas_cost: Optional[float] = 0.0
+    slippage: Optional[float] = 0.0
+    volatility_score: Optional[float] = 0.0
+    predicted_apy: Optional[float] = 0.0
     notes: Optional[str] = None
 
 
 class PredictionTracker:
     """Records and validates AI predictions"""
 
-    def __init__(self, db_path: str = None, validation_days: int = 7):
+    def __init__(self, db_path: str = None, validation_days: int = 1):
         """
         Args:
             db_path: Path to predictions database
@@ -81,6 +87,11 @@ class PredictionTracker:
                     actual_target_apy REAL,
                     was_correct INTEGER,
                     profit_if_followed REAL,
+                    market_context TEXT,
+                    gas_cost REAL,
+                    slippage REAL,
+                    volatility_score REAL,
+                    predicted_apy REAL,
                     notes TEXT
                 )
             """)
@@ -95,7 +106,12 @@ class PredictionTracker:
                           target_pool_apy: float,
                           confidence: float,
                           reason: str,
-                          capital_usd: float) -> int:
+                          capital_usd: float,
+                          market_context: Optional[Dict] = None,
+                          gas_cost: float = 0.0,
+                          slippage: float = 0.0,
+                          volatility_score: float = 0.0,
+                          predicted_apy: float = 0.0) -> int:
         """
         Record a new AI prediction.
         
@@ -108,11 +124,14 @@ class PredictionTracker:
             cursor = conn.execute("""
                 INSERT INTO predictions 
                 (timestamp, prediction_type, current_pool_id, current_pool_apy,
-                 target_pool_id, target_pool_apy, confidence, reason, capital_usd)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 target_pool_id, target_pool_apy, confidence, reason, capital_usd,
+                 market_context, gas_cost, slippage, volatility_score, predicted_apy)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, prediction_type, current_pool_id, current_pool_apy,
-                target_pool_id, target_pool_apy, confidence, reason, capital_usd
+                target_pool_id, target_pool_apy, confidence, reason, capital_usd,
+                json.dumps(market_context) if market_context else None,
+                gas_cost, slippage, volatility_score, predicted_apy
             ))
             conn.commit()
             pred_id = cursor.lastrowid
@@ -149,26 +168,29 @@ class PredictionTracker:
         original_target = pred['target_pool_apy']
         capital = pred['capital_usd']
         
-        # Determine if the prediction was correct
+        # Determination of Correctness (Cost-Adjusted)
+        # We factor in gas and slippage from the original prediction
+        total_costs = (pred.get('gas_cost') or 0.0) + (pred.get('slippage') or 0.0)
+        days = self.validation_days
+        
+        # Calculate theoretical gains over the validation period
+        gain_hold = capital * (actual_current_apy / 100) * (days / 365)
+        gain_move = capital * (actual_target_apy / 100) * (days / 365)
+        net_move_profit = gain_move - gain_hold - total_costs
+
         if prediction_type == "HOLD":
-            # HOLD is correct if current pool is still better (or equal)
-            was_correct = actual_current_apy >= actual_target_apy
-            
-            # Profit calculation: What would have happened if we followed advice?
-            # If we held: earned current APY for N days
-            days = self.validation_days
-            profit_hold = capital * (actual_current_apy / 100) * (days / 365)
-            profit_move = capital * (actual_target_apy / 100) * (days / 365)
-            profit_if_followed = profit_hold  # We followed HOLD advice
+            # HOLD is correct if:
+            # 1. Current APY is literally better
+            # 2. OR Target is better but move is not profitable after costs
+            # 3. OR the AI recognized it's already in the best possible pool (Avoiding churn)
+            is_already_optimal = "[HOLD_OPTIMAL]" in (pred.get('reason') or "") or "[HOLD_ALREADY_OPTIMAL]" in (pred.get('reason') or "")
+            was_correct = (actual_current_apy >= actual_target_apy) or (net_move_profit <= 0) or is_already_optimal
+            profit_if_followed = gain_hold
             
         elif prediction_type == "REBALANCE":
-            # REBALANCE is correct if target pool outperformed
-            was_correct = actual_target_apy > actual_current_apy
-            
-            days = self.validation_days
-            profit_move = capital * (actual_target_apy / 100) * (days / 365)
-            profit_hold = capital * (actual_current_apy / 100) * (days / 365)
-            profit_if_followed = profit_move  # We followed REBALANCE advice
+            # REBALANCE is correct if moving actually resulted in more money than staying
+            was_correct = net_move_profit > 0
+            profit_if_followed = gain_move - total_costs
         else:
             was_correct = None
             profit_if_followed = 0

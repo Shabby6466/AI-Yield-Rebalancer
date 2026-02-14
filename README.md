@@ -149,6 +149,18 @@ Every 10 minutes, the `RebalancerService.run_cycle()` executes this exact checkl
 *   **Production**: The service bundles transactions and sends them to the **Flashbots Relay**. This creates a "Private Lane" to the miners, so no one can see our trade until it's already confirmed in a block.
 *   **Smart Contract Logic**: `StrategyHub.rebalance(uint256 newAaveBps, uint256 newCompBps)` is the only entry point. It handles the actual shifting of USDC between Aave and Compound in a single atomic transaction.
 
+### 🔄 Dynamic Fork Refreshing
+Since the local fork is a snapshot, it can become "stale" over time. To update your local environment to the latest real-world Mainnet state:
+1.  **Run the Refresh Script**:
+    ```bash
+    python scripts/refresh_fork.py
+    ```
+2.  **What it does**:
+    *   Terminates the existing stale Anvil process.
+    *   Starts a new fork at the **latest** Mainnet block height.
+    *   Automatically redeploys the `StrategyHub.sol` contract to the new fork.
+    *   Updates the `deployed_address.txt` for the dashboard and rebalancer to use.
+
 ---
 
 ## 📈 System Health & Logging
@@ -166,12 +178,19 @@ When looking at the dashboard, the "Brain" outputs specific numbers that determi
 *   **Why is it so high?**: In DeFi, yields spike due to **Incentives** (governance tokens like CRV/AERO being distributed) or **Leverage** (e.g., Ethena/Pendle yield-stripping). Even stablecoins can hit 200%+ APY for short bursts when volume is high or liquidity is thin.
 *   **Source**: Pulled directly from DeFiLlama's live feed and mapped to the AI's feature vector.
 
-### 🔋 Confidence / Weight (e.g., 56.5%)
-*   **What it is**: In Reinforcement Learning, the agent outputs an **Allocation Weight** (Softmax output). 
-*   **Calculation**: If the AI suggests 56.5% weight, it means it wants to move a majority of the portfolio into that specific pool. We interpret this "Intensity of Allocation" as **Confidence**.
+### 🔋 Integrated Confidence Score (e.g., 56.5%)
+*   **What it is**: In this system, Confidence is not just a raw AI guess. It is a **Composite Score** that integrates deep learning conviction with real-time market momentum.
+*   **The Formula**:
+    `Integrated Confidence = (Neural Conviction) * (0.8 + 0.2*Momentum + 0.1*Stability)`
+*   **Why it moves**: Because **Momentum** and **Stability** fluctuate in real-time, your confidence score will reflect the "proactiveness" of the Brain even when the base yield is stable.
 *   **The Threshold**: 
-    *   **Weight > 50%**: Status becomes `REBALANCE`. The AI is certain enough to trigger capital movement.
-    *   **Weight < 50%**: Status becomes `HOLD`. The AI is uncertain or the gains don't justify the risk/gas.
+    *   **Score > 50%**: Status becomes `REBALANCE`. The Brain identifies a "Dominant" trend worth the gas and slippage cost.
+    *   **Score < 50%**: Status becomes `HOLD`. The system prioritizes capital preservation over low-conviction yield chasing.
+
+### 🏦 Portfolio States (Current vs Target)
+*   **Current: CASH**: This represents the **Idle State**. Your capital is sitting in the vault as un-deployed stablecoins (e.g., USDC), waiting for a profitable opportunity. The system defaults to this state on fresh starts or after a **Safety Halt**.
+*   **Current: [Pool Name]**: This represents the **Working State**. Your capital is deployed and actively earning yield. 
+*   **State Persistence**: The system uses a `Shared State Store` (`data/system_state.json`) to track your portfolio across restarts. This prevents "Logical Ghosts" where the AI forgets where it put the money if the service is rebooted.
 
 ### 📜 Status: REBALANCE vs HOLD
 *   **REBALANCE**: Triggered when the AI identifies a pool that is "Dominant" (Weights > 0.5).

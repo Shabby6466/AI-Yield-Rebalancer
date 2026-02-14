@@ -25,6 +25,7 @@ This document summarizes the current implementation status of the AI Yield Rebal
 *   **Flashbots Integration**: MEV-resistant bundling for production rebalances.
 *   **StrategyHub Smart Contract**: Atomic rebalancing logic deployed and verified on local forks (Anvil).
 *   **Local Forking Environment**: Full Mainnet fork simulation with automated funding and deployment scripts.
+*   **Dynamic Fork Refreshing**: Scripted process to update the local snapshot to the latest Mainnet block while redeploying logic instantly.
 
 ### 5. Real-Time Dashboard
 *   **Status Tabs**: Comprehensive UI for Backtesting, Decision Tracking, and Portfolio View.
