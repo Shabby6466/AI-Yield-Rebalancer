@@ -61,7 +61,13 @@ services:
         export PYTHONPATH=/app
         
         # 1. Start API Server IMMEDIATELY (Background)
-        uvicorn src.api.server:app --host 0.0.0.0 --port 8000 &
+        # Redirect stderr to stdout so we see errors in logs
+        uvicorn src.api.server:app --host 0.0.0.0 --port 8000 2>&1 &
+        
+        # Give it a moment to crash if it's going to crash
+        sleep 5
+        # Check if it's alive (for debugging)
+        curl -v http://localhost:8000/health || echo "❌ API Server failed to start - Check logs above"
         
         echo '🚢 Phase 1: Deploying Smart Contracts...'
         python3 scripts/start_local_fork.py
