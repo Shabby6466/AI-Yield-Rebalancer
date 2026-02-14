@@ -56,34 +56,46 @@ services:
       - ./data:/app/data
       - ./contracts:/app/contracts
       - ./models:/app/models
-    command: |
+      - ./models:/app/models
+    command: >
       bash -c "
-        export PYTHONPATH=/app
+        export PYTHONPATH=/app &&
+        echo '🚢 Phase 1: Deploying Smart Contracts...' &&
+        python3 scripts/start_local_fork.py &&
+        echo '📊 Phase 1.5: Seeding Database...' &&
+        python3 src/scheduler/collector.py --once &&
         
-        # 1. Start API Server IMMEDIATELY (Background)
-        # Redirect stderr to stdout so we see errors in logs
-        uvicorn src.api.server:app --host 0.0.0.0 --port 8000 2>&1 &
-        
-        # Give it a moment to crash if it's going to crash
-        sleep 5
-        # Check if it's alive (for debugging)
-        curl -v http://localhost:8000/health || echo "❌ API Server failed to start - Check logs above"
-        
-        echo '🚢 Phase 1: Deploying Smart Contracts...'
-        python3 scripts/start_local_fork.py
-        
-        echo '📊 Phase 1.5: Seeding Database...'
-        python3 src/scheduler/collector.py --once
-        
-        echo '🧠 Phase 2: Starting Agents...'
-        # 2. Start Data Collector Loop (Background)
+        echo '🧠 Starting Rebalancer Agent Loop...' &&
+        # Start Data Collector & Rebalancer in parallel
         python3 src/scheduler/collector.py &
-        
-        # 3. Start Rebalancer Agent Loop (Background)
         python3 src/scheduler/rebalancer_loop.py &
-        
-        # Keep container alive
         wait
+      "
+
+  # 3b. AI Brain (API Server)
+  brain:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      anvil:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-admin}:${DB_PASSWORD:-fullstack_secured_2026}@db:5432/${DB_NAME:-rebalancer}
+      - RPC_URL=http://anvil:8545
+      - ETHEREUM_RPC_URL=http://anvil:8545
+      - BASE_RPC_URL=http://anvil:8545
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
+    volumes:
+      - ./data:/app/data
+      - ./contracts:/app/contracts
+      - ./models:/app/models
+    ports:
+      - "8000:8000"
+    command: >
+      bash -c "
+        export PYTHONPATH=/app &&
+        uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --reload
       "
 
   # 4. Analytics Front-end (Streamlit Dashboard)
