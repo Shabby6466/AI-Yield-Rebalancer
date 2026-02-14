@@ -372,18 +372,24 @@ with tab1:
         4. **Multi-Pool Sizing:** Use the **Trade Sizer** tool to calculate a diversified allocation (Max Pools / Max Cap) to minimize single-protocol risk.
         """)
     
-    if st.button(" Ask Brain for Decision", type="primary"):
-        with st.spinner("Analyzing market data, risk models, and gas costs..."):
-            # Payload must use IDs as keys for allocations
-            allocations_payload = {
-                current_asset_id: float(capital_input),
-                target_asset_id: 0.0
-            }
-            
-            payload = {
-                "portfolio_id": "dashboard_live_test",
-                "current_allocations": allocations_payload
-            }
+    col_ask1, col_ask2 = st.columns([3, 1])
+    with col_ask2:
+        force_exec = st.checkbox("Force Executive Override", help="Simulate a forced rebalance (Bypass Risk Checks)")
+    
+    with col_ask1:
+        if st.button("🧠 Ask Brain for Decision", type="primary"):
+            with st.spinner("Analyzing market data, risk models, and gas costs..."):
+                # Payload must use IDs as keys for allocations
+                allocations_payload = {
+                    current_asset_id: float(capital_input),
+                    target_asset_id: 0.0
+                }
+                
+                payload = {
+                    "portfolio_id": "dashboard_live_test",
+                    "current_allocations": allocations_payload,
+                    "force_execution": force_exec
+                }
             
             try:
                 response = requests.post(f"http://{api_host}:8000/inference/predict", json=payload)

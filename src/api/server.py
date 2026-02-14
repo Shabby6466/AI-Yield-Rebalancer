@@ -138,7 +138,20 @@ async def predict_yield_opportunity(request: RebalanceRequest):
     }
 
     # --- DECISION LOGIC ---
-    
+
+    # 0. FORCE EXECUTION (Simulation Mode)
+    if request.force_execution:
+         return PredictionResponse(
+            action="REBALANCE",
+            target_allocations={best_pool['pool']: capital_usd},
+            confidence=1.0,
+            reason="[SIMULATION] Forced Execution by Administrator.",
+            estimated_gas=total_cost,
+            net_apy_gain=(new_apy - current_apy),
+            metrics=cost_breakdown,
+            market_context=market_context
+        )
+
     # 1. Risk: Spike
     if is_spike:
         return {
