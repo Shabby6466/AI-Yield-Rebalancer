@@ -370,6 +370,14 @@ class MLPredictionService:
 
     def get_pool_features(self, pool_address: str, asset_address: str) -> Dict:
         """Fetch accurate pool features with on-chain decimal verification"""
+        # Validate pool_address is a hex string (Catch UUID vs Address error)
+        if not Web3.is_address(pool_address):
+            logger.error(f"❌ Invalid Hex Address: {pool_address}. Check if you are passing a UUID by mistake.")
+            return {}
+
+        # Standardize to checksum address
+        pool_address = Web3.to_checksum_address(pool_address)
+
         # Map symbol to address if needed
         if len(asset_address) < 15:  # Likely a symbol like 'USDC'
             asset_address = self.VERIFIED_ADDRESSES.get(asset_address.upper(), asset_address)

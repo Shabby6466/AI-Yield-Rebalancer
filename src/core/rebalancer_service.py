@@ -13,6 +13,7 @@ from src.backtest.prediction_tracker import PredictionTracker
 from src.core.state_store import StateStore
 from src.execution.ml_prediction_service import MLPredictionService
 from src.data.chainlink_client import ChainlinkClient
+from src.data.timeseries_db import TimeseriesDB
 import numpy as np
 import random
 import os
@@ -87,6 +88,7 @@ class RebalancerService:
             
         self.tracker = PredictionTracker()
         self.state_store = StateStore()
+        self.db = TimeseriesDB() # Added local DB access
         self.phase_logs = []  # Collector for 4-phase storytelling
 
         # --- Realism Memory ---
@@ -191,9 +193,20 @@ class RebalancerService:
         logger.info(f"DYNAMIC_CAPITAL: Scaling decisions based on ${PORTFOLIO_SIZE:,.2f} total assets (ETH @ ${eth_price:,.2f})")
 
         # Enhanced ML Prediction Audit (Liquidity-Aware & Threaded)
+        # 1. Look up the ACTUAL hex address from local DB (replaces UUID)
+        pool_uuid = target_pool['pool']
+        pool_metadata = self.db.get_pool_metadata(pool_uuid)
+        
+        # Fallback: Some pools are known by symbol in the VERIFIED map
+        pool_address = pool_uuid
+        if pool_metadata and pool_metadata.get('pool_address'):
+            pool_address = pool_metadata['pool_address']
+        elif target_pool.get('symbol') == 'USP':
+             pool_address = '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6' # Direct fallback for USP
+             
         ml_audit = await asyncio.to_thread(
             self.ml_service.generate_prediction,
-            pool_address=target_pool['pool'], 
+            pool_address=pool_address, 
             asset_address=target_pool.get('symbol', 'USDC'),
             portfolio_size_usd=PORTFOLIO_SIZE
         )

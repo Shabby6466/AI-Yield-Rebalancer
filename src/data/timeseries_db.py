@@ -30,6 +30,7 @@ class TimeseriesDB:
                 CREATE TABLE IF NOT EXISTS yield_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     pool_id TEXT NOT NULL,
+                    pool_address TEXT,
                     timestamp TEXT NOT NULL,
                     apy REAL NOT NULL,
                     tvl_usd REAL DEFAULT 0,
@@ -248,6 +249,28 @@ class TimeseriesDB:
         
         return [dict(r) for r in rows]
 
+    def get_pool_metadata(self, pool_id: str) -> Optional[Dict]:
+        """Get metadata (like address and symbol) for a specific pool UUID"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("""
+                SELECT pool_id, pool_address, symbol, protocol, chain
+                FROM yield_snapshots
+                WHERE pool_id = ?
+                ORDER BY timestamp DESC LIMIT 1
+            """, (pool_id,)).fetchone()
+        return dict(row) if row else None
+
+    def set_pool_address(self, pool_id: str, address: str):
+        """Manually map a UUID to a hex address for on-chain features"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                UPDATE yield_snapshots 
+                SET pool_address = ? 
+                WHERE pool_id = ?
+            """, (address, pool_id))
+            conn.commit()
+
     def get_unique_dates(self) -> List[str]:
         """Get all unique dates in the database"""
         with sqlite3.connect(self.db_path) as conn:
@@ -294,7 +317,7 @@ class TimeseriesDB:
             List of pool dicts sorted by APY descending
         """
         query = """
-            SELECT ys.pool_id, ys.timestamp, ys.apy, ys.tvl_usd, 
+            SELECT ys.pool_id, ys.pool_address, ys.timestamp, ys.apy, ys.tvl_usd, 
                    ys.chain, ys.protocol, ys.symbol, ys.is_stablecoin
             FROM yield_snapshots ys
             INNER JOIN (
