@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+.pytest_cache/
+
+# Data & Logs (Crucial to ignore these)
+data/
+*.log
+*.sqlite
+*.db
+predictions.db
+yields_timeseries.db
+
+# Deployment artifacts
+deployments/local.json
+contracts/deployed_address.txt
+
+# Docker
+Dockerfile
+docker-compose.yml
+
+# IDEs
+.vscode/
+.idea/

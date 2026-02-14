@@ -539,20 +539,28 @@ class RebalancerService:
     async def start(self):
         """Continuously run the rebalancer."""
         cycle_count = 0
+        interval = int(os.getenv("REBALANCE_INTERVAL", 300))
+        
+        logger.info(f"Rebalancer Loop Active (Interval: {interval}s)")
+
         while True:
             try:
-                await self.run_cycle()
+                # Use a Hard Timeout (2 mins) to ensure we NEVER hang forever on a stalling RPC/API
+                logger.info(f"⏱️ Starting Cycle {cycle_count + 1}...")
+                await asyncio.wait_for(self.run_cycle(), timeout=120)
                 cycle_count += 1
                 
-                # Run drift audit every 24 cycles (assuming 1-hour intervals, approx 1 day for POC)
+                # Accuracy Audit
                 if cycle_count % 24 == 0:
                     self._audit_prediction_drift()
                     
+            except asyncio.TimeoutError:
+                logger.error(f"🚨 Cycle {cycle_count + 1} TIMED OUT after 120s! Skipping to next interval...")
             except Exception as e:
-                logger.error(f"Error in rebalancer cycle: {e}")
+                logger.error(f"Error in rebalancer cycle: {e}", exc_info=True)
             
-            # Wait for cooldown
-            interval = int(os.getenv("REBALANCE_INTERVAL", 3600))
+            # Use Heartbeat Logging during wait
+            logger.info(f"💤 Cycle {cycle_count} complete. Sleeping for {interval}s...")
             await asyncio.sleep(interval)
 
 if __name__ == "__main__":

@@ -1,5 +1,12 @@
 version: '3.8'
 
+# Global Log Rotation Settings
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # 1. Database Layer (PostgreSQL with TimescaleDB)
   db:
@@ -13,6 +20,7 @@ services:
     volumes:
       - timescale_data:/var/lib/postgresql/data
       - ./db:/docker-entrypoint-initdb.d # Auto-executes schema.sql and ml_schema.sql
+    logging: *default-logging
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-admin} -d ${DB_NAME:-rebalancer}" ]
       interval: 5s
@@ -25,6 +33,7 @@ services:
     command: anvil --fork-url https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY} --host 0.0.0.0 --port 8545
     ports:
       - "8545:8545"
+    logging: *default-logging
     environment:
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
     healthcheck:
@@ -36,6 +45,7 @@ services:
   # 3. AI Rebalancer Engine (The Backend)
   rebalancer:
     build: .
+    logging: *default-logging
     depends_on:
       db:
         condition: service_healthy
@@ -77,6 +87,7 @@ services:
   # 3b. AI Brain (API Server)
   brain:
     build: .
+    logging: *default-logging
     depends_on:
       db:
         condition: service_healthy
@@ -103,6 +114,7 @@ services:
   # 4. Analytics Front-end (Streamlit Dashboard)
   dashboard:
     build: .
+    logging: *default-logging
     # Note: Inside Docker, Nginx communicates via port 8501
     depends_on:
       db:
