@@ -224,6 +224,9 @@ class RebalancerService:
         logger.info(f"DYNAMIC_CAPITAL: Scaling decisions based on ${float(PORTFOLIO_SIZE):,.2f} total assets (ETH @ ${float(eth_price):,.2f})")
 
         # Enhanced ML Prediction Audit (Liquidity-Aware & Threaded)
+        symbol = target_pool.get('symbol', 'USDC').upper()
+        project = target_pool.get('project', '').lower()
+        
         # 1. Use the centralized resolver for consistency
         pool_address = self._resolve_pool_address(target_pool['pool'], symbol, project)
         
