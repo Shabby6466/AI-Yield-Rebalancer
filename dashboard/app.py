@@ -274,8 +274,15 @@ with tab2:
                     metrics = ctx.get('metrics', {})
 
                     # 1. ROI Period (Days)
-                    roi_val = metrics.get('roi_days', 999)
-                    roi_str = f"{roi_val:.1f} Days" if roi_val < 365 else "Never"
+                    roi_val = metrics.get('roi_days')
+                    
+                    if roi_val is None:
+                         roi_str = "N/A" # Legacy data
+                    elif roi_val == float('inf') or roi_val > 3650:
+                         roi_str = "Never"
+                    else:
+                         roi_str = f"{roi_val:.1f} Days"
+                         
                     fp1.metric("ROI Period", roi_str, help="Time to recover gas/fees")
 
                     # 2. Net Gain (APY %)

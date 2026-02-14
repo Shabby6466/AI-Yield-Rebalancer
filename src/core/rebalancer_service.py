@@ -177,11 +177,31 @@ class RebalancerService:
         logger.info(f"Strategy: {target_pool['symbol']} ({target_apy:.2f}%) | Conviction: {weights[top_idx]:.1%}")
 
         # --- REALISM CHECK 1: Are we already in this pool? ---
+        # Prepare Context & Calculations first (Moved up/duplicated for early return)
+        PORTFOLIO_SIZE = float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0))
+        
+        # Determine metrics even if holding
+        # If holding identical pool, costs are technically zero relative to staying
+        zero_metrics = {
+            "gas_cost_usd": 0.0,
+            "estimated_slippage": 0.0,
+            "total_costs_usd": 0.0,
+            "monthly_gain_usd": 0.0,
+            "net_profit_usd": 0.0,
+            "break_even_days": 0.0,
+            "gas_exit": 0.0,
+            "gas_enter": 0.0,
+            "swap_fees": 0.0,
+            "total_conversion_loss": 0.0,
+            "roi_days": 0.0
+        }
+
         if target_pool_id == self.current_pool_id and weights[top_idx] > 0.8:
             logger.info(f"HOLD: Current position {target_pool['symbol']} remains optimal.")
             await self._record_cycle_prediction(weights, latest_features, forced_type="HOLD", 
                                         forced_reason=f"[HOLD_OPTIMAL] Already in {target_pool['symbol']}",
-                                        target_pool=target_pool, safety_report=safety_report)
+                                        target_pool=target_pool, safety_report=safety_report,
+                                        metrics=zero_metrics) # Pass zero metrics!
             return
 
         # Prepare Context & Calculations for Phases
