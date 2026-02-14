@@ -5,15 +5,16 @@ services:
   db:
     image: timescale/timescaledb:latest-pg15
     environment:
-      - POSTGRES_DB=rebalancer
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=fullstack_secured_2026
+      - POSTGRES_DB=${DB_NAME:-rebalancer}
+      - POSTGRES_USER=${DB_USER:-admin}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-fullstack_secured_2026}
     ports:
       - "5432:5432"
     volumes:
       - timescale_data:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d # Auto-executes schema.sql and ml_schema.sql
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U admin -d rebalancer" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-admin} -d ${DB_NAME:-rebalancer}" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -41,7 +42,7 @@ services:
       anvil:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://admin:fullstack_secured_2026@db:5432/rebalancer
+      - DATABASE_URL=postgresql://${DB_USER:-admin}:${DB_PASSWORD:-fullstack_secured_2026}@db:5432/${DB_NAME:-rebalancer}
       - RPC_URL=http://anvil:8545
       - NETWORK=local
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
@@ -71,7 +72,7 @@ services:
       anvil:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://admin:fullstack_secured_2026@db:5432/rebalancer
+      - DATABASE_URL=postgresql://${DB_USER:-admin}:${DB_PASSWORD:-fullstack_secured_2026}@db:5432/${DB_NAME:-rebalancer}
       - RPC_URL=http://anvil:8545
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
     volumes:
