@@ -52,6 +52,7 @@ services:
       - DEPLOYER_PRIVATE_KEY=${KEEPER_PRIVATE_KEY}
       - STRATEGY_HUB_ADDRESS=${STRATEGY_HUB_ADDRESS:-}
       - DUNE_API_KEY=${DUNE_API_KEY}
+      - REBALANCE_INTERVAL=300
     volumes:
       - ./data:/app/data
       - ./contracts:/app/contracts
@@ -66,8 +67,9 @@ services:
         python3 src/scheduler/collector.py --once &&
         
         echo '🧠 Starting Rebalancer Agent Loop...' &&
-        # Start Data Collector & Rebalancer in parallel
-        python3 src/scheduler/collector.py &
+        echo '🧠 Starting Rebalancer Agent Loop...' &&
+        # Start Data Collector (Every 5 mins = 0.083 hours) & Rebalancer in parallel
+        python3 src/scheduler/collector.py --interval 0.083 &
         python3 src/scheduler/rebalancer_loop.py &
         wait
       "
