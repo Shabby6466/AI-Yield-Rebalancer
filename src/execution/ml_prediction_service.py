@@ -351,20 +351,29 @@ class MLPredictionService:
         
         logger.info(f"ML Prediction Service initialized for {network}")
     
-    # Common Mainnet Asset Addresses for mapping symbols to addresses
-    COMMON_ASSETS = {
+    # Verified Ethereum Mainnet Addresses
+    VERIFIED_ADDRESSES = {
         'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
         'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
         'DAI': '0x6B175474E89094C44Da98b954EEDEAC495271d0F',
         'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-        'ETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+        'ETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', # Map to WETH for contract logic
+        'USP': '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6',
+        'EURC': '0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c',
+        'SUSDE': '0x9D39A5DE30e57443BfF2A8307A4256c8797A3497',
+        'USDS': '0xdc035d45d973e3ec169d2276ddab16f1e407384f'
     }
 
     def get_pool_features(self, pool_address: str, asset_address: str) -> Dict:
         """Fetch accurate pool features with on-chain decimal verification"""
         # Map symbol to address if needed
-        if len(asset_address) < 10:  # Likely a symbol like 'USDC'
-            asset_address = self.COMMON_ASSETS.get(asset_address.upper(), asset_address)
+        if len(asset_address) < 15:  # Likely a symbol like 'USDC'
+            asset_address = self.VERIFIED_ADDRESSES.get(asset_address.upper(), asset_address)
+        
+        # Ensure it's a valid hex address
+        if not asset_address.startswith('0x'):
+             logger.warning(f"Invalid asset address for features: {asset_address}, trying USDC fallback")
+             asset_address = self.VERIFIED_ADDRESSES['USDC']
         
         try:
             # 1. Define Standard ERC20 ABI for decimals
@@ -493,29 +502,39 @@ class MLPredictionService:
         # Expand 4 base features -> 32 dimensions
         return self.expand_features(base_np)
 
-    def generate_prediction(self, pool_address: str, asset_address: str, portfolio_size_usd: float = 100000.0) -> Dict:
-        """Generate ML prediction for a pool with Liquidity & History"""
-        # Get pool features
+    def generate_prediction(self, pool_address: str, asset_identifier: str, portfolio_size_usd: float = 750000.0) -> Dict:
+        """Generate ML prediction with hex-safe identifiers and corrected SQL"""
+        
+        # 1. Resolve Symbol to Hex Address
+        asset_address = self.VERIFIED_ADDRESSES.get(asset_identifier.upper(), asset_identifier)
+        
+        # 2. Safety Check: Ensure we have a hex string now
+        if not asset_address.startswith('0x'):
+            logger.error(f"Invalid asset identifier: {asset_identifier}. Cannot generate prediction.")
+            return {}
+
+        # Fetch real-time features
         features = self.get_pool_features(pool_address, asset_address)
-        
-        # 1. Real Historical Sequence prep (Fetched as base 4, then expanded)
-        # We need to fetch base history first to update the LAST element before expanding
-        # Re-fetch or manually update the expanded array
-        # Let's override get_historical_sequence to return base or just re-expand
-        
+        if not features: return {}
+
+        # 3. Fix the Database Query
         base_sequence = []
         conn = self.db_logger._get_conn()
         if conn:
             try:
                 with conn.cursor() as cur:
-                    cur.execute("""
+                    query = """
                         SELECT py.apy_percent, py.tvl_usd 
                         FROM protocol_yields py
                         JOIN protocols p ON py.protocol_id = p.id
                         WHERE py.asset = %s
-                        AND (p.address = %s OR %s ILIKE '%' || p.symbol || '%')
-                        ORDER BY py.recorded_at DESC LIMIT %s
-                    """, (asset_address if len(asset_address) < 10 else "USDC", pool_address, pool_address, 14))
+                        AND (p.address = %s OR %s ILIKE '%%' || p.symbol || '%%')
+                        ORDER BY py.recorded_at DESC LIMIT 14
+                    """
+                    # The fix: Ensure exactly 3 variables match the 3 %s placeholders
+                    params = (asset_identifier, pool_address, pool_address)
+                    cur.execute(query, params)
+                    
                     rows = cur.fetchall()
                     for row in reversed(rows):
                         base_sequence.append([float(row[0]), float(row[1]), 0.05, 0.5])

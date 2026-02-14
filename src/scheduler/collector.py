@@ -78,22 +78,14 @@ class YieldCollector:
                         # Normalize name for matching
                         display_name = project_id_name.replace('-', ' ').title()
                         
-                        # Try to find protocol, or create if missing
-                        cur.execute("SELECT id FROM protocols WHERE name ILIKE %s OR symbol ILIKE %s LIMIT 1", 
-                                    (f"%{project_id_name}%", f"%{project_id_name}%"))
-                        res = cur.fetchone()
-                        
-                        if not res:
-                            # Auto-create missing protocol
-                            cur.execute("""
-                                INSERT INTO protocols (name, symbol, chain, address, protocol_type)
-                                VALUES (%s, %s, %s, %s, %s)
-                                RETURNING id
-                            """, (display_name, project_id_name.upper()[:10], pool.get('chain', 'ethereum'), '0x0', 'vault'))
-                            protocol_id = cur.fetchone()[0]
-                            logger.info(f"➕ Created missing protocol entry for: {display_name}")
-                        else:
-                            protocol_id = res[0]
+                        # Force Atomic Upsert for protocol
+                        cur.execute("""
+                            INSERT INTO protocols (name, symbol, chain, address, protocol_type)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+                            RETURNING id
+                        """, (display_name, project_id_name.upper()[:10], pool.get('chain', 'ethereum'), '0x0', 'vault'))
+                        protocol_id = cur.fetchone()[0]
 
                         ts = pool.get('timestamp')
                         if ts:

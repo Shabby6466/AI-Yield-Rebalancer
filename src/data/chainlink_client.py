@@ -2,6 +2,7 @@ import logging
 import json
 from web3 import Web3
 import os
+import asyncio
 
 logger = logging.getLogger(__name__)
 
