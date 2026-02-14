@@ -224,39 +224,17 @@ class RebalancerService:
         logger.info(f"DYNAMIC_CAPITAL: Scaling decisions based on ${float(PORTFOLIO_SIZE):,.2f} total assets (ETH @ ${float(eth_price):,.2f})")
 
         # Enhanced ML Prediction Audit (Liquidity-Aware & Threaded)
-        # 1. Look up the ACTUAL hex address from local DB (replaces UUID)
-        pool_uuid = target_pool['pool']
-        resolved_address = self.db.get_pool_address(pool_uuid)
-        
-        symbol = target_pool.get('symbol', 'USDC').upper()
-        project = target_pool.get('project', '').lower()
-        
-        # 2. Protocol Fallbacks (If DB metadata is missing)
-        if not resolved_address or not resolved_address.startswith('0x'):
-            # Fuzzy matching for symbols and projects
-            symbol_up = symbol.upper()
-            if 'USP' in symbol_up:
-                resolved_address = '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6' 
-            elif 'AAVE' in project or 'AAVE' in symbol_up:
-                resolved_address = '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2' # Aave V3 Pool
-            elif 'COMPOUND' in project or 'COMP' in symbol_up:
-                resolved_address = '0xc3d688b66703497daa19211eedff47f25384cdc3' # Compound V3 Comet
-            elif 'ETHENA' in project or 'SUSDE' in symbol_up or 'USDE' in symbol_up:
-                resolved_address = '0x9d39a5de30e57443bff2a8307a4256c8797a3497' # Ethena sUSDe
-            elif 'USDC' in symbol_up:
-                 resolved_address = '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2' # Default USDC to Aave
+        # 1. Use the centralized resolver for consistency
+        pool_address = self._resolve_pool_address(target_pool['pool'], symbol, project)
         
         # 3. Hard Safety Check: Never pass a UUID to the ML service
-        if not resolved_address or not resolved_address.startswith('0x'):
-            logger.warning(f"⚠️ Could not resolve hex address for {symbol} (UUID: {pool_uuid}). Skipping pool.")
+        if not pool_address or not pool_address.startswith('0x'):
+            logger.warning(f"⚠️ Could not resolve hex address for {symbol} (UUID: {target_pool['pool']}). Skipping pool.")
             # Record skip for tracker
             await self._record_cycle_prediction(weights, latest_features, forced_type="HOLD", 
                                         forced_reason=f"[SKIP_UUID] Could not resolve address for {symbol}",
                                         target_pool=target_pool, safety_report=safety_report)
             return
-        
-        # Final address is the resolved one
-        pool_address = resolved_address
              
         # 3. Resolve Asset Token Address (0x hex) specifically for the audit
         underlying = target_pool.get('underlyingTokens', [])
@@ -276,7 +254,7 @@ class RebalancerService:
         # 3.5 ML Audit for CURRENT pool to compare risks (Issue 3 Implementation)
         current_ml_audit = None
         if self.current_pool_id and self.current_pool_id != "none" and self.current_pool_id != "CASH":
-            curr_pool_addr = self.db.get_pool_address(self.current_pool_id)
+            curr_pool_addr = self._resolve_pool_address(self.current_pool_id, self.current_pool_symbol, "")
             if curr_pool_addr and curr_pool_addr.startswith('0x'):
                 current_ml_audit = await asyncio.to_thread(
                     self.ml_service.generate_prediction,
@@ -284,6 +262,15 @@ class RebalancerService:
                     asset_symbol=self.current_pool_symbol,
                     portfolio_size_usd=PORTFOLIO_SIZE
                 )
+        
+        # 3.7 Liquidity Panic Check (Ghost TVL Blind Spot)
+        is_liquidity_emergency = False
+        if current_ml_audit:
+            curr_tvl = Decimal(str(current_ml_audit.get('tvl', 0)))
+            # Hard Exit Rule: If TVL < 2x Portfolio, we are trapped. EXIT NOW.
+            if curr_tvl < (Decimal("2.0") * PORTFOLIO_SIZE) and self.current_pool_id != "CASH":
+                logger.error(f"🚨 ILLIQUIDITY PANIC: Current Pool {self.current_pool_symbol} TVL (${float(curr_tvl):,.0f}) < 2x Portfolio Size!")
+                is_liquidity_emergency = True
 
         # 4. Liquidity Concentration Check (Crucial for $2.9M+)
         # Ensure we don't own more than 5% of the pool to avoid toxic slippage
@@ -404,7 +391,12 @@ class RebalancerService:
 
         # Phase 1: The Opportunity Gap
         risk_msg = f" (Defense active: Risk reduction {risk_delta:.1f} pts)" if is_defensive_move else ""
-        p1_msg = f"🔍 Phase 1: Detecting Opportunity Gap...\n- Current: {self.current_pool_symbol} ({ml_predicted_current_apy:.2f}% Predicted APY)\n- Target: {target_pool['symbol']} ({ml_predicted_target_apy:.2f}% Predicted APY)\n- Gap: {apy_gain:.2f}% yield differential{risk_msg}"
+        
+        # Labeling (Predicted vs Live) for Transparency
+        c_label = "Predicted" if current_ml_audit else "Live"
+        t_label = "Predicted" if ml_audit else "Live"
+        
+        p1_msg = f"🔍 Phase 1: Detecting Opportunity Gap...\n- Current: {self.current_pool_symbol} ({ml_predicted_current_apy:.2f}% {c_label} APY - Expected Future)\n- Target: {target_pool['symbol']} ({ml_predicted_target_apy:.2f}% {t_label} APY - Expected Future)\n- Gap: {apy_gain:.2f}% yield differential{risk_msg}"
         logger.info(p1_msg)
         self.phase_logs.append(p1_msg)
 
@@ -420,7 +412,7 @@ class RebalancerService:
         
         is_profitable = (apy_gain >= MIN_GAIN_THRESHOLD and net_profit_usd > 0)
         
-        if not is_profitable and not is_defensive_move:
+        if not is_profitable and not is_defensive_move and not is_liquidity_emergency:
             reason = f"Costs > Gain" if net_profit_usd <= 0 else f"Low Gain {apy_gain:.2f}% < {MIN_GAIN_THRESHOLD}%"
             logger.info(f"❌ Verdict: REJECTED ({reason}). Holding Position.")
             self.phase_logs.append(f"❌ Verdict: REJECTED ({reason}).")
@@ -433,6 +425,10 @@ class RebalancerService:
         if is_defensive_move and apy_gain < 0:
             logger.info(f"🛡️ DEFENSIVE MOVE: Proceeding with {apy_gain:.2f}% yield drop to reduce risk by {risk_delta:.1f} pts.")
             self.phase_logs.append(f"🛡️ DEFENSIVE MOVE: Reducing risk by {risk_delta:.1f} pts.")
+
+        if is_liquidity_emergency:
+            logger.error("🚨 EMERGENCY EXIT: Liquidity Trap detected in current pool. Overriding yield math.")
+            self.phase_logs.append("🚨 EMERGENCY EXIT: Liquidity Trap detected.")
 
         logger.info(f"✅ Verdict: GO! Triggering Atomic Rebalance...")
         self.phase_logs.append("✅ Verdict: GO! Triggering Atomic Rebalance...")
@@ -711,6 +707,33 @@ class RebalancerService:
             # Use Heartbeat Logging during wait
             logger.info(f"💤 Cycle {cycle_count} complete. Sleeping for {interval}s...")
             await asyncio.sleep(interval)
+
+    def _resolve_pool_address(self, pool_uuid: str, symbol: str, project: str) -> Optional[str]:
+        """Centralized helper to map pool IDs to on-chain hex addresses with fuzzy logic."""
+        if not pool_uuid:
+            return None
+        
+        # 1. Direct DB Lookup
+        addr = self.db.get_pool_address(pool_uuid)
+        if addr and addr.startswith('0x'):
+            return addr
+            
+        # 2. Fuzzy Fallbacks (Chain/Protocol specific)
+        symbol_up = str(symbol).upper()
+        project_low = str(project).lower()
+        
+        if 'USP' in symbol_up:
+            return '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6' 
+        elif 'AAVE' in project_low or 'AAVE' in symbol_up:
+            return '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2'
+        elif 'COMPOUND' in project_low or 'COMP' in symbol_up:
+            return '0xc3d688b66703497daa19211eedff47f25384cdc3'
+        elif 'ETHENA' in project_low or 'SUSDE' in symbol_up or 'USDE' in symbol_up:
+            return '0x9d39a5de30e57443bff2a8307a4256c8797a3497'
+        elif 'USDC' in symbol_up:
+             return '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2' # Default to Aave V3
+             
+        return None
 
 if __name__ == "__main__":
     service = RebalancerService()

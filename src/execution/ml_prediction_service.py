@@ -484,7 +484,10 @@ class MLPredictionService:
                 except Exception as e:
                     logger.warning(f"Failed to fetch Aave APY: {e}")
             
-            logger.info(f"External Pool: {pool_address[:8]} | APY: {current_apy:.2f}% | TVL: ${tvl_scaled:,.2f}")
+            if tvl_scaled == 0:
+                logger.warning(f"🚨 GHOST TVL DETECTED: External Pool {pool_address[:8]} reports $0.00 liquidity on-chain. This may be a vault with indirect holdings or an inactive pool.")
+            else:
+                logger.info(f"External Pool: {pool_address[:8]} | APY: {current_apy:.2f}% | TVL: ${tvl_scaled:,.2f}")
             
             return {
                 'current_apy': current_apy,

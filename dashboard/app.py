@@ -51,6 +51,7 @@ try:
             ctx = {}
         
         metrics = ctx.get('metrics', {})
+        if not isinstance(metrics, dict): metrics = {}
         
         # 1. Balance
         # Default to 0 if not yet recorded in latest cycle
@@ -315,6 +316,7 @@ with tab2:
                     fp0, fp1, fp2, fp3, fp4 = st.columns(5)
                     
                     metrics = ctx.get('metrics', {})
+                    if not isinstance(metrics, dict): metrics = {}
                     
                     # 0. Dynamic Managed Capital
                     capital = p.get('capital_usd', 100000.0)
@@ -398,6 +400,7 @@ with tab2:
 
                     # --- Cost & Profit Analysis (New Section) ---
                     metrics = ctx.get('metrics', {})
+                    if not isinstance(metrics, dict): metrics = {}
                     if metrics:
                         st.divider()
                         st.markdown("#### 💸 Cost & Profit Analysis")
