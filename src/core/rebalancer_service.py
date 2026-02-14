@@ -210,13 +210,38 @@ class RebalancerService:
         eth_price_float, price_updated_at = await self.chainlink.get_asset_price('ETH')
         eth_price = Decimal(str(eth_price_float))
         
-        # Oracle Lag Safety (Issue 6)
+        # Oracle Lag Safety with Escalating Warnings
         lag_seconds = int(datetime.utcnow().timestamp()) - price_updated_at
-        if lag_seconds > 60:
+        lag_minutes = lag_seconds / 60
+        lag_hours = lag_seconds / 3600
+        
+        # Critical Thresholds
+        WARN_THRESHOLD = 60  # 1 minute
+        CRITICAL_THRESHOLD = 3600  # 1 hour
+        HALT_THRESHOLD = 14400  # 4 hours (even in local mode)
+        
+        if lag_seconds > HALT_THRESHOLD:
+            logger.critical(f"🚨 CRITICAL ORACLE FAILURE: ETH Price is {lag_hours:.1f} hours stale!")
+            logger.critical(f"   Data Age: {lag_seconds}s ({lag_hours:.1f}h)")
+            logger.critical(f"   Portfolio valuation (${float(PORTFOLIO_SIZE):,.0f}) is UNRELIABLE.")
+            logger.critical(f"   HALTING ALL OPERATIONS - Anvil fork needs refresh!")
+            logger.critical(f"   ACTION REQUIRED: Restart Anvil with fresh fork: docker compose restart anvil")
+            await self._record_cycle_prediction([], {}, forced_type="ABORTED", 
+                                        forced_reason=f"[ABORT_STALE_DATA] Oracle lag {lag_hours:.1f}h exceeds safety limit",
+                                        target_pool={}, safety_report={})
+            return
+        elif lag_seconds > CRITICAL_THRESHOLD:
+            logger.critical(f"⚠️ CRITICAL ORACLE LAG: ETH Price is {lag_hours:.1f} hours stale!")
+            logger.critical(f"   Portfolio valuation may be incorrect by ±{lag_hours * 2:.0f}%")
+            logger.critical(f"   Proceeding with EXTREME CAUTION in local mode...")
+            if self.network != "local":
+                logger.error(f"🚨 ORACLE LAG DETECTED: ETH Price is {lag_seconds}s stale (Max: {WARN_THRESHOLD}s). Aborting cycle for safety.")
+                return
+        elif lag_seconds > WARN_THRESHOLD:
             if self.network == "local":
-                logger.warning(f"⚠️ Oracle Lag Detected ({lag_seconds}s), but proceeding because NETWORK=local (simulation mode).")
+                logger.warning(f"⚠️ Oracle Lag Detected ({lag_seconds}s / {lag_minutes:.1f}m), but proceeding because NETWORK=local (simulation mode).")
             else:
-                logger.error(f"🚨 ORACLE LAG DETECTED: ETH Price is {lag_seconds}s stale (Max: 60s). Aborting cycle for safety.")
+                logger.error(f"🚨 ORACLE LAG DETECTED: ETH Price is {lag_seconds}s stale (Max: {WARN_THRESHOLD}s). Aborting cycle for safety.")
                 return
 
         # If wallet has balance, use it. Otherwise fallback to ENV for safety.
