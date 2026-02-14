@@ -168,7 +168,7 @@ with st.sidebar:
                 [sys.executable, "-m", "src.scheduler.collector", "--once"],
                 capture_output=True, text=True, timeout=30,
                 stdin=subprocess.DEVNULL,
-                cwd="/Users/Akmal/Desktop/projects/defi rebalancing/AI-Yield-Rebalancer"
+                cwd="/app"
             )
             if result.returncode == 0:
                 st.success("Data refreshed!")
