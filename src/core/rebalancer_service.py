@@ -184,7 +184,9 @@ class RebalancerService:
         try:
             raw_bal = self.w3.eth.get_balance(self.account.address)
             wallet_balance = float(self.w3.from_wei(raw_bal, 'ether'))
-        except Exception:
+            logger.info(f"💰 WALLET CHECK: {self.account.address} has {wallet_balance:.4f} ETH")
+        except Exception as e:
+            logger.error(f"❌ Wallet Check Failed: {e}")
             wallet_balance = 0.0
 
         # Determine metrics even if holding
