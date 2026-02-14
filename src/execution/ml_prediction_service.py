@@ -392,59 +392,53 @@ class MLPredictionService:
     
     # Verified Ethereum Mainnet Addresses
     VERIFIED_ADDRESSES = {
-        'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-        'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-        'DAI': '0x6B175474E89094C44Da98b954EEDEAC495271d0F',
-        'WETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
-        'ETH': '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', # Map to WETH for contract logic
-        'USP': '0x098697Ba3fEE4Ea76294c5d6a466a4E3b3e95fE6',
-        'EURC': '0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c',
-        'SUSDE': '0x9D39A5DE30e57443BfF2A8307A4256c8797A3497',
+        'USDC': '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+        'USDT': '0xdac17f958d2ee523a2206206994597c13d831ec7',
+        'DAI': '0x6b175474e89094c44da98b954eedeac495271d0f',
+        'WETH': '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+        'ETH': '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', 
+        'USP': '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6',
+        'EURC': '0x1abaea1f7c830bd89acc67ec4af516284b1bc33c',
+        'SUSDE': '0x9d39a5de30e57443bff2a8307a4256c8797a3497',
         'USDS': '0xdc035d45d973e3ec169d2276ddab16f1e407384f',
         # Yield-bearing "i" tokens (Instadapp/Lite)
-        'IDAI': '0x611CC53503d97Dc9080c98f86f78716A803dB3f7',
-        'IUSDC': '0x3274576510Cd38CB54B647185C01306C94339Be9',
-        'IUSDT': '0x3B68EF230a17409f583152Cd08064F250B39fEed',
+        'IDAI': '0x611cc53503d97dc9080c98f86f78716a803db3f7',
+        'IUSDC': '0x3274576510cd38cb54b647185c01306c94339be9',
+        'IUSDT': '0x3b68ef230a17409f583152cd08064f250b39feed',
         # Additional Common Stablecoins
-        'FRAX': '0x853d955aCEf822Db058eb8505911ED77F175b99e',
-        'MUSD': '0xe2f2a5C287993345a840Db3B0845fbC70f5935a5',
-        'GHO': '0x40D16FC0246AD3160CCC09B8D0D3A2CD28AE6C2f',
+        'FRAX': '0x853d955acef822db058eb8505911ed77f175b99e',
+        'MUSD': '0xe2f2a5c287993345a840db3b0845fbc70f5935a5',
+        'GHO': '0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f',
         'LUSD': '0x5f98805a4e8be255a32880fdec7f6728c6568ba0',
-        'PYUSD': '0x6c3ea9036406852006290770BEdFcAbA0e23A0e8'
+        'PYUSD': '0x6c3ea9036406852006290770bedfcaba0e23a0e8'
     }
 
     def get_pool_features(self, pool_address: str, asset_address: str) -> Dict:
         """Fetch accurate pool features with on-chain decimal verification"""
-        # Validate pool_address is a hex string (Catch UUID vs Address error)
-        if not Web3.is_address(pool_address):
-            logger.error(f"❌ Invalid Hex Address: {pool_address}. Check if you are passing a UUID by mistake.")
-            return {}
-
-        # Standardize to checksum address
-        pool_address = Web3.to_checksum_address(pool_address)
-
-        # Map symbol to address if needed
-        if len(asset_address) < 15:  # Likely a symbol like 'USDC'
-            asset_address = self.VERIFIED_ADDRESSES.get(asset_address.upper(), asset_address)
-        
-        # Ensure it's a valid hex address
-        if not asset_address.startswith('0x'):
-             logger.warning(f"Invalid asset address for features: {asset_address}, trying USDC fallback")
-             asset_address = self.VERIFIED_ADDRESSES['USDC']
-        
-        # Checksum asset address
-        asset_address = Web3.to_checksum_address(asset_address)
-        
         try:
-            # 1. Standardize to checksum address
+            # 1. Sanity Check: Ensure they are hex addresses (ignoring case for the check)
+            if not Web3.is_address(pool_address.lower()):
+                logger.error(f"❌ Invalid Hex Address: {pool_address}. Check if you are passing a UUID by mistake.")
+                return {}
+
+            # 2. Standardize to checksum addresses
             pool_address = Web3.to_checksum_address(pool_address)
+            
+            # Map symbol to address if needed
+            if len(asset_address) < 15:  # Likely a symbol like 'USDC'
+                asset_address = self.VERIFIED_ADDRESSES.get(asset_address.upper(), asset_address)
+            
+            if not asset_address or not asset_address.startswith('0x'):
+                 logger.warning(f"Invalid asset address for features: {asset_address}, trying USDC fallback")
+                 asset_address = self.VERIFIED_ADDRESSES['USDC']
+            
             asset_address = Web3.to_checksum_address(asset_address)
             
-            # 2. Protocol Identification
+            # 3. Protocol Identification
             strategy_manager = self.contract_manager.contracts.get('StrategyManager')
             strategy_manager_addr = strategy_manager.address if strategy_manager else None
             
-            # 3. Feature Extraction Dispatcher
+            # 4. Feature Extraction Dispatcher
             if pool_address == strategy_manager_addr:
                 return self._fetch_internal_strategy_features(pool_address, asset_address)
             
@@ -459,7 +453,8 @@ class MLPredictionService:
             
             # APY Detection
             current_apy = 0.0
-            if pool_address == '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2': # Aave V3
+            aave_v3_pool = Web3.to_checksum_address('0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2')
+            if pool_address == aave_v3_pool: # Aave V3
                 try:
                     pool_contract = self.contract_manager.w3.eth.contract(address=pool_address, abi=self.AAVE_V3_POOL_ABI)
                     reserve_data = pool_contract.functions.getReserveData(asset_address).call()

@@ -203,15 +203,15 @@ class RebalancerService:
         # 2. Protocol Fallbacks (If DB metadata is missing)
         if not resolved_address or not resolved_address.startswith('0x'):
             if symbol == 'USP':
-                resolved_address = '0x098697Ba3fEE4Ea76294c5d6a466a4E3b3e95fE6' 
+                resolved_address = '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6' 
             elif 'aave' in project:
-                resolved_address = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2' # Aave V3 Pool
+                resolved_address = '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2' # Aave V3 Pool
             elif 'compound' in project:
-                resolved_address = '0xc3d688B66703497DAA19211EEdff47f25384cdc3' # Compound V3 Comet
+                resolved_address = '0xc3d688b66703497daa19211eedff47f25384cdc3' # Compound V3 Comet
             elif 'ethena' in project or symbol == 'SUSDE':
-                resolved_address = '0x9D39A5DE30e57443BfF2A8307A4256c8797A3497' # Ethena sUSDe
+                resolved_address = '0x9d39a5de30e57443bff2a8307a4256c8797a3497' # Ethena sUSDe
             elif symbol == 'USDC':
-                 resolved_address = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2' # Default USDC to Aave
+                 resolved_address = '0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2' # Default USDC to Aave
         
         # 3. Hard Safety Check: Never pass a UUID to the ML service
         if not resolved_address or not resolved_address.startswith('0x'):
