@@ -294,6 +294,11 @@ class TimeseriesDB:
                         return res
             return None
 
+    def get_pool_address(self, pool_id: str) -> Optional[str]:
+        """Resolves DeFiLlama UUID to on-chain Hex Address via local metadata."""
+        meta = self.get_pool_metadata(pool_id)
+        return meta.get('pool_address') if meta else None
+
     def set_pool_address(self, pool_id: str, address: str):
         """Manually map a UUID to a hex address for on-chain features"""
         with sqlite3.connect(self.db_path) as conn:

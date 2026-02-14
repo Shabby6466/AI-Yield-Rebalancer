@@ -195,24 +195,35 @@ class RebalancerService:
         # Enhanced ML Prediction Audit (Liquidity-Aware & Threaded)
         # 1. Look up the ACTUAL hex address from local DB (replaces UUID)
         pool_uuid = target_pool['pool']
-        pool_metadata = self.db.get_pool_metadata(pool_uuid)
+        resolved_address = self.db.get_pool_address(pool_uuid)
+        
         symbol = target_pool.get('symbol', 'USDC').upper()
         project = target_pool.get('project', '').lower()
         
-        # 2. Resolve final hex address using DB or Protocol Fallbacks
-        pool_address = pool_uuid # Default to UUID if all fails
+        # 2. Protocol Fallbacks (If DB metadata is missing)
+        if not resolved_address or not resolved_address.startswith('0x'):
+            if symbol == 'USP':
+                resolved_address = '0x098697Ba3fEE4Ea76294c5d6a466a4E3b3e95fE6' 
+            elif 'aave' in project:
+                resolved_address = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2' # Aave V3 Pool
+            elif 'compound' in project:
+                resolved_address = '0xc3d688B66703497DAA19211EEdff47f25384cdc3' # Compound V3 Comet
+            elif 'ethena' in project or symbol == 'SUSDE':
+                resolved_address = '0x9D39A5DE30e57443BfF2A8307A4256c8797A3497' # Ethena sUSDe
+            elif symbol == 'USDC':
+                 resolved_address = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2' # Default USDC to Aave
         
-        if pool_metadata and pool_metadata.get('pool_address'):
-            pool_address = pool_metadata['pool_address']
-        elif symbol == 'USP':
-            pool_address = '0x098697Ba3fEE4Ea76294c5d6a466a4E3b3e95fE6' 
-        elif 'aave' in project:
-            pool_address = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2' # Aave V3 Pool
-        elif 'compound' in project:
-            pool_address = '0xc3d688B66703497DAA19211EEdff47f25384cdc3' # Compound V3 Comet
-        elif symbol == 'USDC' and pool_address == pool_uuid:
-             # Generically assume Aave if it's the top USDC pool and we have no better info
-             pool_address = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2'
+        # 3. Hard Safety Check: Never pass a UUID to the ML service
+        if not resolved_address or not resolved_address.startswith('0x'):
+            logger.warning(f"⚠️ Could not resolve hex address for {symbol} (UUID: {pool_uuid}). Skipping pool.")
+            # Record skip for tracker
+            await self._record_cycle_prediction(weights, latest_features, forced_type="HOLD", 
+                                        forced_reason=f"[SKIP_UUID] Could not resolve address for {symbol}",
+                                        target_pool=target_pool, safety_report=safety_report)
+            return
+        
+        # Final address is the resolved one
+        pool_address = resolved_address
              
         # 3. Resolve Asset Token Address (0x hex) specifically for the audit
         underlying = target_pool.get('underlyingTokens', [])
