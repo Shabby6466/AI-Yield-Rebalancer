@@ -273,7 +273,11 @@ with tab2:
                     
                     metrics = ctx.get('metrics', {})
 
-                    # 1. ROI Period (Days)
+                    # 1. Net Gain (APY %) (Moved Up)
+                    net_gain = (p.get('target_pool_apy', 0) or 0) - (p.get('current_pool_apy', 0) or 0)
+                    fp2.metric("Net Gain", f"{net_gain:+.2f}%", help="Yield difference (Target - Current APY)")
+
+                    # 2. ROI Period (Days)
                     roi_val = metrics.get('roi_days')
                     
                     if roi_val is None:
@@ -286,10 +290,6 @@ with tab2:
                          roi_str = f"{roi_val:.1f} Days"
                          
                     fp1.metric("ROI Period", roi_str, help="Time to recover gas/fees")
-
-                    # 2. Net Gain (APY %)
-                    net_gain = (p.get('target_pool_apy', 0) or 0) - (p.get('current_pool_apy', 0) or 0)
-                    fp2.metric("Net Gain", f"{net_gain:+.2f}%", help="Yield difference (Target - Current APY)")
 
                     # 3. APR (Use Target APY for simplicity as requested)
                     fp3.metric("Target APR", f"{(p.get('target_pool_apy', 0) or 0):.2f}%", help="Projected annual rate")
