@@ -374,7 +374,15 @@ class MLPredictionService:
     # Standard ABIs for Protocol Dispatching
     ERC20_ABI = [
         {"constant": True, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}], "type": "function"},
-        {"constant": True, "inputs": [{"name": "_owner", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "balance", "type": "uint256"}], "type": "function"}
+        {"constant": True, "inputs": [{"name": "_owner", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "balance", "type": "uint256"}], "type": "function"},
+        {"constant": True, "inputs": [], "name": "totalSupply", "outputs": [{"name": "", "type": "uint256"}], "type": "function"}
+    ]
+    
+    # ERC-4626 Vault Standard (Yearn, Ethena, etc.)
+    ERC4626_ABI = [
+        {"inputs": [], "name": "totalAssets", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
+        {"inputs": [], "name": "asset", "outputs": [{"internalType": "address", "name": "", "type": "address"}], "stateMutability": "view", "type": "function"},
+        {"inputs": [], "name": "decimals", "outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}], "stateMutability": "view", "type": "function"}
     ]
     
     AAVE_V3_POOL_ABI = [
@@ -409,6 +417,14 @@ class MLPredictionService:
             "type": "function"
         }
     ]
+    
+    # Known Vault Registry (Protocol-Specific Addresses)
+    KNOWN_VAULTS = {
+        # Ethena sUSDe (ERC-4626)
+        '0x9d39a5de30e57443bff2a8307a4256c8797a3497': {'type': 'erc4626', 'name': 'Ethena sUSDe'},
+        # Yearn vaults (examples - add more as needed)
+        '0xa354f35829ae975e850e23e9615b11da1b3dc4de': {'type': 'erc4626', 'name': 'Yearn USDC'},
+    }
     
     # Verified Ethereum Mainnet Addresses
     VERIFIED_ADDRESSES = {
@@ -493,9 +509,13 @@ class MLPredictionService:
                     tvl_raw = token_contract.functions.balanceOf(pool_address).call()
                     tvl_scaled = float(tvl_raw) / (10 ** decimals)
             else:
-                # Generic TVL: Balance of the pool address
-                tvl_raw = token_contract.functions.balanceOf(pool_address).call()
-                tvl_scaled = float(tvl_raw) / (10 ** decimals)
+                # Use Protocol-Specific TVL Resolver for modern vaults
+                from src.execution.protocol_tvl_resolver import ProtocolTVLResolver
+                tvl_resolver = ProtocolTVLResolver(self.contract_manager.w3)
+                tvl_scaled, tvl_method = tvl_resolver.resolve_tvl(pool_address, asset_address, decimals)
+                
+                if tvl_scaled > 0:
+                    logger.info(f"✓ TVL Resolution: {pool_address[:8]} | Method: {tvl_method} | TVL: ${tvl_scaled:,.2f}")
             
             # Ghost TVL Detection with Oracle Health Check
             if tvl_scaled == 0:
