@@ -197,7 +197,10 @@ class RebalancerService:
             asset_address=target_pool.get('symbol', 'USDC'),
             portfolio_size_usd=PORTFOLIO_SIZE
         )
-        
+        if not ml_audit or not ml_audit.get('success', False):
+            logger.warning(f"Skipping pool {target_pool['symbol']} due to failed ML audit.")
+            return
+
         if ml_audit['risk_level'] == 'high':
             logger.warning(f"ML Audit REJECTED Target {target_pool['symbol']}: {ml_audit['risk_level']} Risk (Liquidity Toxic: {ml_audit.get('liquidity_toxic')})")
             await self._record_cycle_prediction(weights, latest_features, forced_type="ABORTED", 

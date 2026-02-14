@@ -403,6 +403,11 @@ class MLPredictionService:
             
             pool_info = strategy_manager.functions.getPool(pool_id).call()
             
+            # Check if pool exists (TVL or APY should be non-zero for active pools)
+            if pool_info[4] == 0:  # TVL is 0
+                logger.warning(f"Pool {pool_address} with asset {asset_address} not found in StrategyManager")
+                return {}
+            
             # 4. Scale Values Correctly
             # pool_info[3] is APY in basis points (e.g., 550 = 5.5%)
             current_apy = float(pool_info[3]) / 100.0
@@ -505,17 +510,39 @@ class MLPredictionService:
     def generate_prediction(self, pool_address: str, asset_address: str, portfolio_size_usd: float = 750000.0) -> Dict:
         """Generate ML prediction with hex-safe identifiers and corrected SQL"""
         
-        # 1. Resolve Symbol to Hex Address
-        resolved_address = self.VERIFIED_ADDRESSES.get(asset_address.upper(), asset_address)
+        # 1. Resolve Symbol to Hex Address (Handle LP tokens like USDC-USDT)
+        primary_asset = asset_address.split('-')[0].upper()
+        resolved_address = self.VERIFIED_ADDRESSES.get(primary_asset)
         
-        # 2. Safety Check: Ensure we have a hex string now
-        if not resolved_address.startswith('0x'):
-            logger.error(f"Invalid asset identifier: {asset_address}. Cannot generate prediction.")
-            return {}
+        # 2. Safety Check & Skeleton Return (to prevent KeyError in RebalancerService)
+        if not resolved_address or not resolved_address.startswith('0x'):
+            logger.warning(f"Resolution Failed: {asset_address} (Primary: {primary_asset}) not in Verified Map.")
+            return {
+                'predicted_apy': 0.0,
+                'risk_level': 'high',
+                'confidence': 0.0,
+                'timestamp': datetime.now().isoformat(),
+                'pool_address': pool_address,
+                'asset_address': asset_address,
+                'network': self.network,
+                'liquidity_toxic': True,
+                'success': False
+            }
 
         # Fetch real-time features
         features = self.get_pool_features(pool_address, resolved_address)
-        if not features: return {}
+        if not features:
+            return {
+                'predicted_apy': 0.0,
+                'risk_level': 'high',
+                'confidence': 0.0,
+                'timestamp': datetime.now().isoformat(),
+                'pool_address': pool_address,
+                'asset_address': asset_address,
+                'network': self.network,
+                'liquidity_toxic': True,
+                'success': False
+            }
 
         # 3. Fix the Database Query
         base_sequence = []
@@ -585,7 +612,8 @@ class MLPredictionService:
             'pool_address': pool_address,
             'asset_address': asset_address,
             'network': self.network,
-            'liquidity_toxic': liquidity_is_toxic
+            'liquidity_toxic': liquidity_is_toxic,
+            'success': True
         }
         
         # Log to database
