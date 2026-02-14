@@ -361,7 +361,11 @@ class MLPredictionService:
         'USP': '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6',
         'EURC': '0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c',
         'SUSDE': '0x9D39A5DE30e57443BfF2A8307A4256c8797A3497',
-        'USDS': '0xdc035d45d973e3ec169d2276ddab16f1e407384f'
+        'USDS': '0xdc035d45d973e3ec169d2276ddab16f1e407384f',
+        # Yield-bearing "i" tokens (Instadapp/Lite)
+        'IDAI': '0x611CC53503d97Dc9080c98f86f78716A803dB3f7',
+        'IUSDC': '0x3274576510Cd38CB54B647185C01306C94339Be9',
+        'IUSDT': '0x3B68EF230a17409f583152Cd08064F250B39fEeD'
     }
 
     def get_pool_features(self, pool_address: str, asset_address: str) -> Dict:
@@ -497,7 +501,6 @@ class MLPredictionService:
                 logger.warning(f"Failed to fetch real history from DB: {e}")
             finally:
                 self.db_logger._put_conn(conn)
-        
         # Backfill with noise if sequence is short
         while len(sequence) < sequence_length:
             # Base features: APY, TVL, Vol, Risk
@@ -506,28 +509,53 @@ class MLPredictionService:
         base_np = np.array(sequence).astype(np.float32)
         # Expand 4 base features -> 32 dimensions
         return self.expand_features(base_np)
+    def resolve_asset_address(self, identifier: str) -> Optional[str]:
+        """
+        Advanced resolver that handles pairs and protocol prefixes.
+        Example: 'IDAI-IUSDC-IUSDT' -> 'IDAI' -> 'DAI' -> 0x6B17...
+        """
+        # 1. Take the first asset in a pair
+        primary = identifier.split('-')[0].upper()
+        
+        # 2. List of common protocol prefixes to strip (ordered by length)
+        prefixes = ['ST', 'W', 'A', 'C', 'I', 'Y']
+        
+        clean_symbol = primary
+        for pref in prefixes:
+            # Only strip if it leaves a valid symbol (e.g., don't strip 'A' from 'AAVE')
+            if primary.startswith(pref) and len(primary) > len(pref):
+                potential_match = primary[len(pref):]
+                if potential_match in self.VERIFIED_ADDRESSES:
+                    clean_symbol = potential_match
+                    logger.info(f"Resolved {identifier} -> {clean_symbol}")
+                    break
+                    
+        return self.VERIFIED_ADDRESSES.get(clean_symbol)
 
     def generate_prediction(self, pool_address: str, asset_address: str, portfolio_size_usd: float = 750000.0) -> Dict:
         """Generate ML prediction with hex-safe identifiers and corrected SQL"""
         
-        # 1. Resolve Symbol to Hex Address (Handle LP tokens like USDC-USDT)
-        primary_asset = asset_address.split('-')[0].upper()
-        resolved_address = self.VERIFIED_ADDRESSES.get(primary_asset)
+        # 1. Resolve Symbol to Hex Address
+        resolved_address = self.resolve_asset_address(asset_address)
         
-        # 2. Safety Check & Skeleton Return (to prevent KeyError in RebalancerService)
-        if not resolved_address or not resolved_address.startswith('0x'):
-            logger.warning(f"Resolution Failed: {asset_address} (Primary: {primary_asset}) not in Verified Map.")
-            return {
-                'predicted_apy': 0.0,
-                'risk_level': 'high',
-                'confidence': 0.0,
-                'timestamp': datetime.now().isoformat(),
-                'pool_address': pool_address,
-                'asset_address': asset_address,
-                'network': self.network,
-                'liquidity_toxic': True,
-                'success': False
-            }
+        if not resolved_address:
+            # Fallback: check if the identifier itself is a hex address
+            if asset_address.startswith('0x'):
+                resolved_address = asset_address
+            else:
+                primary_asset = asset_address.split('-')[0].upper()
+                logger.error(f"⚠️ Resolution Failed: {asset_address} (Primary: {primary_asset}) not in Verified Map.")
+                return {
+                    'predicted_apy': 0.0,
+                    'risk_level': 'high',
+                    'confidence': 0.0,
+                    'timestamp': datetime.now().isoformat(),
+                    'pool_address': pool_address,
+                    'asset_address': asset_address,
+                    'network': self.network,
+                    'liquidity_toxic': True,
+                    'success': False
+                }
 
         # Fetch real-time features
         features = self.get_pool_features(pool_address, resolved_address)
