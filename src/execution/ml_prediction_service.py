@@ -291,8 +291,8 @@ class RiskClassifier:
         else:
             self.label_encoder = None
             
-    def predict_risk_score(self, features: np.ndarray) -> Tuple[str, float]:
-        """Predict risk level and confidence"""
+    def predict_risk_score(self, features: np.ndarray) -> Tuple[str, float, float]:
+        """Predict risk level, confidence, and numerical score (0-100)"""
         if self.model is None:
             # Simulated risk for POC if model file is missing
             levels = ['low', 'medium', 'high']
@@ -327,22 +327,28 @@ class RiskClassifier:
             confidence = float(probs[predicted_class]) * 100
             
             # Continuous Risk Score (0-100): Weighted average of probabilities
-            # Low=15, Medium=50, High=85
-            risk_score = float(probs[0] * 15 + probs[1] * 50 + probs[2] * 85)
+            # Supports models with 2 or 3 output classes
+            if len(probs) >= 3:
+                risk_score = float(probs[0] * 15 + probs[1] * 50 + probs[2] * 85)
+            elif len(probs) == 2:
+                # Binary classification: Assume Low (0) and High (1)
+                risk_score = float(probs[0] * 20 + probs[1] * 80)
+            else:
+                risk_score = 50.0
             
             # Map to risk level
             if self.label_encoder is not None:
                 risk_level = self.label_encoder.inverse_transform([predicted_class])[0]
             else:
                 risk_levels = ['low', 'medium', 'high']
-                risk_level = risk_levels[min(predicted_class, 2)]
+                risk_level = risk_levels[min(predicted_class, len(risk_levels)-1)]
             
             logger.info(f"Risk prediction: {risk_level} (score: {risk_score:.1f}, confidence: {confidence:.2f}%)")
             return risk_level, confidence, risk_score
             
         except Exception as e:
             logger.error(f"Risk prediction failed: {e}")
-            return 'medium', 50.0
+            return 'medium', 50.0, 50.0
 
 
 class MLPredictionService:
