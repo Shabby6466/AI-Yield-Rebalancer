@@ -41,11 +41,16 @@ class ContractManager:
             "sepolia": os.getenv("SEPOLIA_RPC_URL"),
             "base_sepolia": os.getenv("BASE_SEPOLIA_RPC_URL"),
             "mainnet": os.getenv("ETHEREUM_RPC_URL"),
-            "ethereum": os.getenv("ETHEREUM_RPC_URL"),
-            "base": os.getenv("BASE_RPC_URL")
+            "ethereum": os.getenv("RPC_URL"), # For fork mode, RPC_URL is often used
+            "base": os.getenv("BASE_RPC_URL"),
+            "local": "http://anvil:8545" # Internal docker DNS
         }
         
         rpc_url = rpc_urls.get(self.network)
+        if not rpc_url:
+             # Fallback to generic RPC_URL if set
+             rpc_url = os.getenv("RPC_URL")
+             
         if not rpc_url:
             raise ValueError(f"No RPC URL configured for {self.network}")
             

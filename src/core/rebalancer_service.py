@@ -47,10 +47,24 @@ class RebalancerService:
         self.signer = Account.from_key(os.getenv("KEEPER_PRIVATE_KEY"))
         
         # Phase 1: Institutional Intelligence Layer
-        self.ml_service = MLPredictionService(network="ethereum")
+        # Detect Network (Priority: Env -> File -> Default)
+        network = os.getenv("NETWORK", "ethereum")
+        if os.path.exists("contracts/deployed_address.txt"):
+            network = "local"
+            logger.info("Found local deployment file. Switching to NETWORK=local")
+            
+        self.ml_service = MLPredictionService(network=network)
         
         # Initialize Layers
-        self.guard = CircuitBreaker(self.w3, os.getenv("STRATEGY_HUB_ADDRESS"), ml_service=self.ml_service)
+        
+        # Resolve StrategyHub Address (Env or Local File)
+        hub_address = os.getenv("STRATEGY_HUB_ADDRESS")
+        if not hub_address and os.path.exists("contracts/deployed_address.txt"):
+            with open("contracts/deployed_address.txt", "r") as f:
+                hub_address = f.read().strip()
+                logger.info(f"Loaded StrategyHub from file: {hub_address}")
+        
+        self.guard = CircuitBreaker(self.w3, hub_address, ml_service=self.ml_service)
         self.hands = FlashbotsRelayer(self.w3, self.signer)
         self.dune = DuneClient(os.getenv("DUNE_API_KEY"))
         self.defillama = DefiLlamaClient()

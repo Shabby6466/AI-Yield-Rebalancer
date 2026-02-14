@@ -109,6 +109,11 @@ def deploy_contracts():
             "StrategyHub": {
                 "address": addr,
                 "abi": "contracts/out/StrategyHub.sol/StrategyHub.json"
+            },
+            # Alias for services expecting Manager
+            "StrategyManager": {
+                "address": addr,
+                "abi": "contracts/out/StrategyHub.sol/StrategyHub.json"
             }
         }
         
