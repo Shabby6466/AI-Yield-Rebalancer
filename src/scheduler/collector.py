@@ -12,6 +12,8 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+import os
+import psycopg2
 from src.data.defillama_client import DefiLlamaClient
 from src.data.timeseries_db import TimeseriesDB
 
@@ -35,7 +37,75 @@ class YieldCollector:
         self.backfill_days = backfill_days
         self.client = DefiLlamaClient()
         self.db = TimeseriesDB()
+        self.db_url = os.getenv('DATABASE_URL')
         self._running = False
+        
+        if self.db_url:
+            self._seed_protocols()
+
+    def _seed_protocols(self):
+        """Ensure core protocols exist in PostgreSQL for foreign key integrity"""
+        protocols = [
+            ('Aave V3', 'AAVE', 'ethereum', '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2', 'lending'),
+            ('Compound V3', 'COMP', 'ethereum', '0xc3d688B66703497DAA19211EEdff47f25384cdc3', 'lending'),
+            ('Curve Finance', 'CRV', 'ethereum', '0x0000000000000000000000000000000000000000', 'dex'),
+            ('Uniswap V3', 'UNI', 'ethereum', '0x1F98431c8aD98523631AE4a59f267346ea31F984', 'dex')
+        ]
+        try:
+            with psycopg2.connect(self.db_url) as conn:
+                with conn.cursor() as cur:
+                    for name, symbol, chain, addr, ptype in protocols:
+                        cur.execute("""
+                            INSERT INTO protocols (name, symbol, chain, address, protocol_type)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (name) DO NOTHING
+                        """, (name, symbol, chain, addr, ptype))
+                conn.commit()
+            logger.info("✓ Protocols seeded in PostgreSQL")
+        except Exception as e:
+            logger.warning(f"Protocol seeding failed: {e}")
+
+    def _sync_to_postgres(self, pools: list):
+        """Sync yield data to PostgreSQL protocol_yields table"""
+        if not self.db_url:
+            return
+
+        try:
+            with psycopg2.connect(self.db_url) as conn:
+                with conn.cursor() as cur:
+                    for pool in pools:
+                        project = pool.get('project', pool.get('protocol', 'Unknown'))
+                        # Try to find protocol
+                        cur.execute("SELECT id FROM protocols WHERE name ILIKE %s LIMIT 1", (f"%{project}%",))
+                        res = cur.fetchone()
+                        
+                        if res:
+                            protocol_id = res[0]
+                            ts = pool.get('timestamp')
+                            if ts:
+                                recorded_at = datetime.fromtimestamp(ts) if isinstance(ts, (int, float)) else ts
+                            else:
+                                recorded_at = datetime.utcnow()
+
+                            cur.execute("""
+                                INSERT INTO protocol_yields 
+                                (protocol_id, asset, apy_percent, total_liquidity_usd, available_liquidity_usd, tvl_usd, recorded_at)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (protocol_id, asset, recorded_at) DO UPDATE SET
+                                apy_percent = EXCLUDED.apy_percent,
+                                tvl_usd = EXCLUDED.tvl_usd
+                            """, (
+                                protocol_id,
+                                pool.get('symbol', 'unknown'),
+                                float(pool.get('apy', 0)),
+                                float(pool.get('tvlUsd', 0)),
+                                float(pool.get('tvlUsd', 0)),
+                                float(pool.get('tvlUsd', 0)),
+                                recorded_at
+                            ))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"PostgreSQL sync failed: {e}")
 
     async def collect_current(self) -> int:
         """
@@ -61,8 +131,10 @@ class YieldCollector:
                 and p.get('apy', 0) < 500  # Filter scams
             ]
 
-            # Store in DB
+            # Store in DBs
             count = self.db.bulk_insert(filtered)
+            self._sync_to_postgres(filtered)
+            
             duration = time.time() - start
 
             self.db.log_collection(count, duration, "success")
@@ -91,6 +163,19 @@ class YieldCollector:
                 return 0
 
             count = self.db.insert_historical(pool_id, history, metadata=metadata)
+            
+            # Prepare for PG sync
+            pg_data = []
+            for h in history:
+                pg_data.append({
+                    'project': metadata.get('project') if metadata else 'Unknown',
+                    'symbol': metadata.get('symbol') if metadata else 'unknown',
+                    'apy': h.get('apy', 0),
+                    'tvlUsd': h.get('tvlUsd', 0),
+                    'timestamp': h.get('timestamp')
+                })
+            self._sync_to_postgres(pg_data)
+            
             logger.info(f"Backfilled {count} records for pool {pool_id}")
             return count
 
