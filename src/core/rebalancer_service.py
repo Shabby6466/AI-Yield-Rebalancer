@@ -62,6 +62,8 @@ class RebalancerService:
         if os.path.exists("contracts/deployed_address.txt"):
             network = "local"
             logger.info("Found local deployment file. Switching to NETWORK=local")
+        
+        self.network = network
             
         self.ml_service = MLPredictionService(network=network)
         self.chainlink = ChainlinkClient(self.w3)
@@ -211,8 +213,11 @@ class RebalancerService:
         # Oracle Lag Safety (Issue 6)
         lag_seconds = int(datetime.utcnow().timestamp()) - price_updated_at
         if lag_seconds > 60:
-             logger.error(f"🚨 ORACLE LAG DETECTED: ETH Price is {lag_seconds}s stale (Max: 60s). Aborting cycle for safety.")
-             return
+            if self.network == "local":
+                logger.warning(f"⚠️ Oracle Lag Detected ({lag_seconds}s), but proceeding because NETWORK=local (simulation mode).")
+            else:
+                logger.error(f"🚨 ORACLE LAG DETECTED: ETH Price is {lag_seconds}s stale (Max: 60s). Aborting cycle for safety.")
+                return
 
         # If wallet has balance, use it. Otherwise fallback to ENV for safety.
         PORTFOLIO_SIZE = Decimal(str(wallet_balance)) * eth_price if wallet_balance > 0.01 else Decimal(os.getenv("PORTFOLIO_SIZE_USD", "100000.0"))
