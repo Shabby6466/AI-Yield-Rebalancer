@@ -85,7 +85,9 @@ services:
       - ./data:/app/data
       - ./contracts:/app/contracts
       - ./models:/app/models
-    command: streamlit run dashboard/app.py --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    command: streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port 8501 --server.enableCORS false --server.enableXsrfProtection false
 
   # 5. Production Gateway (Nginx)
   gateway:
