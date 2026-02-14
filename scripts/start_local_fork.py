@@ -102,6 +102,20 @@ def deploy_contracts():
         # Anvil usually stays the same if we use the first account
         addr = "0x5FbDB2315678afecb367f032d93F642f64180aa3" # Default first deployment
         print(f"✅ StrategyHub likely deployed to: {addr}")
+        
+        # Save in the format ContractManager expects
+        deployment_data = {
+            "StrategyHub": {
+                "address": addr,
+                "abi": "contracts/out/StrategyHub.sol/StrategyHub.json"
+            }
+        }
+        
+        os.makedirs("deployments", exist_ok=True)
+        with open("deployments/local.json", "w") as f:
+            json.dump(deployment_data, f, indent=2)
+            
+        # Also helpful to have simple text file
         with open("contracts/deployed_address.txt", "w") as f:
             f.write(addr)
         return addr
