@@ -19,8 +19,9 @@ def run_deploy():
     # 3. Launch Stack
     print("🐳 Building and launching Docker stack (DB, Engine, Front-end, Fork)...")
     try:
-        # We use --build to ensure all new optimizations are included
-        subprocess.run(["docker-compose", "up", "--build", "-d"], check=True)
+        # Using 'docker compose' (V2) instead of legacy 'docker-compose'
+        # This avoids metadata errors during log streaming and recreation
+        subprocess.run(["docker", "compose", "up", "--build", "-d"], check=True)
         print("✅ Stack started successfully in detached mode.")
     except subprocess.CalledProcessError as e:
         print(f"❌ Docker Compose failed: {e}")

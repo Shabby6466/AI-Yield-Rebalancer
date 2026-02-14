@@ -77,7 +77,9 @@ def deploy_contracts():
         "src/StrategyHub.sol:StrategyHub",
         "--rpc-url", RPC_URL,
         "--private-key", PK,
-        "--constructor-args", USDC, AAVE_POOL, AUSDC, COMPOUND_COMET
+        "--constructor-args", USDC, AAVE_POOL, AUSDC, COMPOUND_COMET,
+        "--remappings", "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+        "--remappings", "forge-std/=lib/forge-std/src/"
     ]
     
     result = subprocess.run(cmd, cwd="contracts", capture_output=True, text=True)
