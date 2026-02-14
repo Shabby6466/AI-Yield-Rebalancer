@@ -221,7 +221,11 @@ with tab2:
 
         # Prediction Feed
         st.markdown("#### Autonomous Decision Feed")
-        preds = tracker.get_all_predictions(limit=15)
+        
+        if "feed_limit" not in st.session_state:
+            st.session_state["feed_limit"] = 15
+            
+        preds = tracker.get_all_predictions(limit=st.session_state["feed_limit"])
         
         if preds:
             for p in preds:
@@ -340,6 +344,11 @@ with tab2:
                                 else: st.error(f"Cost Impact: {efficiency:.1f}% (Too High)")
 
                     st.info(f"**Reason:** {p['reason']}")
+            
+            if len(preds) >= st.session_state["feed_limit"]:
+                if st.button("Load More History...", use_container_width=True):
+                    st.session_state["feed_limit"] += 15
+                    st.rerun()
         else:
             st.info("Waiting for the first autonomous cycle to complete...")
             
