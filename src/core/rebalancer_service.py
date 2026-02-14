@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from web3 import Web3
 from eth_account import Account
 from src.ml.rl_agent import PPORebalancer, DefiRebalanceEnv
