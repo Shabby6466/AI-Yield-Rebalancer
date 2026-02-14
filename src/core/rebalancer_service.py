@@ -353,6 +353,11 @@ class RebalancerService:
                                  metrics: Dict = None):
         """Log the cycle's decision to both SQLite (Dashboard) and PostgreSQL (Audit Trail)."""
         try:
+            # Determine prediction type from forced_type or calculate it
+            # In this flow, forced_type is almost always passed ("HOLD", "REBALANCE", "ABORTED")
+            prediction_type = forced_type if forced_type else "HOLD"
+
+            actual_current_symbol = override_current_symbol if override_current_symbol else self.current_pool_symbol
 # ... (rest of function) ...
             self.tracker.record_prediction(
                 prediction_type=prediction_type,
