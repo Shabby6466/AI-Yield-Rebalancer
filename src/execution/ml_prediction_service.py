@@ -505,9 +505,11 @@ class MLPredictionService:
                     logger.info(f"Aave V3 Pool: {pool_address[:8]} | APY: {current_apy:.2f}% | TVL: ${tvl_scaled:,.2f} (via aToken supply)")
                 except Exception as e:
                     logger.error(f"Failed to fetch Aave V3 data: {e}")
-                    # Fallback to generic method
-                    tvl_raw = token_contract.functions.balanceOf(pool_address).call()
-                    tvl_scaled = float(tvl_raw) / (10 ** decimals)
+                    logger.warning(f"   Aave V3 contract call failed. This may indicate:")
+                    logger.warning(f"   1. Stale Anvil fork (restart with: docker compose restart anvil)")
+                    logger.warning(f"   2. RPC connection issues")
+                    logger.warning(f"   3. Contract not deployed on this network")
+                    # Don't use balanceOf fallback - let it try protocol resolver below
             else:
                 # Use Protocol-Specific TVL Resolver for modern vaults
                 from src.execution.protocol_tvl_resolver import ProtocolTVLResolver

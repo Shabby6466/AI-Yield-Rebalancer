@@ -33,6 +33,8 @@ class ProtocolTVLResolver:
         self.KNOWN_VAULTS = {
             # Ethena sUSDe (ERC-4626)
             '0x9d39a5de30e57443bff2a8307a4256c8797a3497': {'type': 'erc4626', 'name': 'Ethena sUSDe'},
+            # USP - Universal Savings Protocol (ERC-4626)
+            '0x098697ba3fee4ea76294c5d6a466a4e3b3e95fe6': {'type': 'erc4626', 'name': 'USP'},
             # Yearn vaults (examples)
             '0xa354f35829ae975e850e23e9615b11da1b3dc4de': {'type': 'erc4626', 'name': 'Yearn USDC'},
         }

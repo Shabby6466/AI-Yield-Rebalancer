@@ -761,9 +761,26 @@ class RebalancerService:
             logger.warning(f"   - Gas Estimation failed: {e}. Falling back to 550,000.")
             rebalance_tx['gas'] = 550000
 
-        # Add EIP-1559 Fees
-        rebalance_tx['maxFeePerGas'] = int(self.w3.eth.gas_price * 1.5)
-        rebalance_tx['maxPriorityFeePerGas'] = self.w3.to_wei(2, 'gwei')
+        # Add EIP-1559 Fees (Correct Formula)
+        try:
+            # Get current base fee from latest block
+            latest_block = self.w3.eth.get_block('latest')
+            base_fee = latest_block.get('baseFeePerGas', self.w3.eth.gas_price)
+            
+            # Priority fee (tip to miners)
+            max_priority_fee = self.w3.to_wei(2, 'gwei')
+            
+            # Max fee must be >= base_fee + priority_fee
+            max_fee_per_gas = int(base_fee * 1.5 + max_priority_fee)
+            
+            rebalance_tx['maxFeePerGas'] = max_fee_per_gas
+            rebalance_tx['maxPriorityFeePerGas'] = max_priority_fee
+            
+            logger.info(f"   - Gas Fees: Base={base_fee/1e9:.2f} Gwei, Priority={max_priority_fee/1e9:.2f} Gwei, Max={max_fee_per_gas/1e9:.2f} Gwei")
+        except Exception as e:
+            # Fallback for networks without EIP-1559 support
+            logger.warning(f"   - EIP-1559 not supported, using legacy gas price: {e}")
+            rebalance_tx['gasPrice'] = int(self.w3.eth.gas_price * 1.2)
         
         logger.info(f"   - Encoded StrategyHub.rebalance({new_aave_bps}, {new_comp_bps})")
         return [rebalance_tx]
