@@ -384,10 +384,35 @@ with tab1:
                     
                     st.info(f"**Reasoning:** {result['reason']}")
                     
-                    if 'metrics' in result and result['metrics']:
-                        st.markdown("### 💸 Cost Breakdown")
-                        m = result['metrics']
-                        
+                    # Row 2: Pool Metadata (New Section)
+                    with st.expander("📋 Pool Metadata (Addresses & Chain)", expanded=True):
+                        meta = result.get('market_context', {}).get('target_metadata', {})
+                        if meta:
+                            mp1, mp2 = st.columns(2)
+                            pool_addr = meta.get('pool', 'N/A')
+                            chain = meta.get('chain', 'Ethereum')
+                            
+                            # Helper for Etherscan links
+                            def get_scan_link(addr, chain_name):
+                                prefix = "https://etherscan.io/address"
+                                if chain_name.lower() == 'base': prefix = "https://basescan.org/address"
+                                return f"[{addr[:6]}...{addr[-4:]}]({prefix}/{addr})"
+
+                            mp1.markdown(f"**Pool**: {get_scan_link(pool_addr, chain)}")
+                            mp1.markdown(f"**Chain**: {chain}")
+                            mp1.markdown(f"**TVL**: ${meta.get('tvlUsd', 0):,.2f}")
+                            
+                            # Show Tokens
+                            tokens = meta.get('underlyingTokens', [])
+                            if tokens:
+                                token_links = [get_scan_link(t, chain) for t in tokens]
+                                mp2.markdown(f"**Tokens**: {', '.join(token_links)}")
+                        else:
+                            st.info("No detailed metadata available.")
+
+                    st.markdown("### 💸 Cost & Profit Analysis")
+                    m = result.get('metrics')
+                    if m:
                         # Visual Breakdown
                         mc1, mc2, mc3 = st.columns(3)
                         mc1.metric("⛽ Gas Cost", f"${m.get('gas_exit',0) + m.get('gas_bridge',0) + m.get('gas_enter',0):.2f}")
@@ -399,6 +424,8 @@ with tab1:
                             st.success(f"📅 **ROI Period:** Breakeven in **{roi:.1f} days**.")
                         else:
                             st.warning(f"📅 **ROI Period:** >1 Year ({roi:.1f} days). Not recommended.")
+                    else:
+                        st.info("Metrics not calculated (likely due to missing data or 0 confidence).")
 
                     with st.expander("Raw API Response"):
                         st.json(result)

@@ -98,84 +98,87 @@ async def predict_yield_opportunity(request: RebalanceRequest):
     logger.info(f"Market Scan: Current APY {current_apy:.2%} -> Best APY {new_apy:.2%} ({best_pool['symbol']})")
     
     # 2. Filter: Mean Reversion (Is the new yield a spike?)
-    # Fetches simple history (last 30 points)
     history = await clients['defillama'].fetch_historical_yield(best_pool['pool'])
-    historical_apys = [d['apy']/100 for d in history[-30:]] # Last 30 days
+    if not history:
+        historical_apys = []
+    else:
+        historical_apys = [d.get('apy', 0)/100 for d in history[-30:]]
     
-    if clients['mean_reversion'].is_spike(new_apy, historical_apys):
+    is_spike = clients['mean_reversion'].is_spike(new_apy, historical_apys)
+
+    # 3. Filter: Liquidity Check
+    is_low_liquidity = not clients['liquidity'].check_liquidity_depth(best_pool, capital_usd)
+
+    # 4. Financial Analysis (Gas & Profitability) - Run this ALWAYS for visibility
+    if current_pool_id == best_pool['pool']:
+         # Special case: We are already there
+         is_profitable = False
+         total_cost = 0
+         cost_breakdown = {}
+         reason = "Already in best performing pool."
+         confidence = 0.9
+    else:
+        is_profitable, total_cost, cost_breakdown = clients['gas'].should_rebalance(
+            current_apy, new_apy, capital_usd
+        )
+        
+        # Enhance metrics
+        if cost_breakdown:
+            cost_breakdown['total_conversion_loss'] = cost_breakdown.get('total', 0)
+            cost_breakdown['roi_days'] = (
+                total_cost / (cost_breakdown.get('monthly_gain', 1)/30) 
+                if cost_breakdown.get('monthly_gain', 0) > 0 else 999
+            )
+
+    market_context = {
+        "runner_ups": [{"symbol": p['symbol'], "apy": p['apy'], "tvl": p['tvlUsd']} for p in live_pools[:3]],
+        "target_metadata": best_pool,
+        "current_pool_symbol": current_symbol
+    }
+
+    # --- DECISION LOGIC ---
+    
+    # 1. Risk: Spike
+    if is_spike:
         return {
             "action": "HOLD",
             "target_allocations": request.current_allocations,
-            "confidence": 0.25, # Risk Detected
-            "reason": f"Mean Reversion Risk: New APY {new_apy:.2%} is a statistical anomaly.",
-            "estimated_gas": 0,
-            "net_apy_gain": 0,
-            "metrics": None
+            "confidence": 0.25,
+            "reason": f"Mean Reversion Risk: New APY {new_apy:.2%} is likely a temporary spike.",
+            "estimated_gas": total_cost,
+            "net_apy_gain": (new_apy - current_apy),
+            "metrics": cost_breakdown,
+            "market_context": market_context
         }
 
-    # 3. Filter: Vampire Attack (Liquidity Check)
-    if not clients['liquidity'].check_liquidity_depth(best_pool, capital_usd):
+    # 2. Risk: Liquidity
+    if is_low_liquidity:
          return {
             "action": "HOLD",
             "target_allocations": request.current_allocations,
-            "confidence": 0.25, # Risk Detected
-            "reason": f"Liquidity Risk: Moving ${capital_usd} would cause high slippage.",
-            "estimated_gas": 0,
-            "net_apy_gain": 0,
-            "metrics": None
+            "confidence": 0.25,
+            "reason": f"Liquidity Risk: Pool depth insufficient for ${capital_usd:,.0f} (High Slippage).",
+            "estimated_gas": total_cost,
+            "net_apy_gain": (new_apy - current_apy),
+            "metrics": cost_breakdown,
+            "market_context": market_context
         }
 
-    # 4. Filter: Gas Optimization
-    # Estimate Profit vs Cost
-    if current_pool_id == best_pool['pool']:
-         return {
-            "action": "HOLD",
-            "target_allocations": request.current_allocations,
-            "confidence": 0.9,
-            "reason": "Already in best performing pool.",
-            "estimated_gas": 0,
-            "net_apy_gain": 0,
-            "metrics": None
-        }
-
-    is_profitable, total_cost, cost_breakdown = clients['gas'].should_rebalance(
-        current_apy, new_apy, capital_usd
-    )
-    
-    # Enhance metrics with clarity
-    if cost_breakdown:
-        # Total Conversion Loss = Swap Fees + Slippage (assumed negligible for now if liquidity check passed)
-        cost_breakdown['total_conversion_loss'] = cost_breakdown.get('total', 0)
-        cost_breakdown['roi_days'] = (
-            total_cost / (cost_breakdown.get('monthly_gain', 1)/30) 
-            if cost_breakdown.get('monthly_gain', 0) > 0 else 999
-        )
-
-    market_context = {
-        "runner_ups": [{"symbol": p['symbol'], "apy": p['apy'], "tvl": p['tvlUsd']} for p in live_pools[:3]],
-        "target_metadata": best_pool,
-        "current_pool_symbol": current_symbol
-    }
-
-    market_context = {
-        "runner_ups": [{"symbol": p['symbol'], "apy": p['apy'], "tvl": p['tvlUsd']} for p in live_pools[:3]],
-        "target_metadata": best_pool,
-        "current_pool_symbol": current_symbol
-    }
-
+    # 3. Financials: Not Profitable
     if not is_profitable:
+        monthly_gain = cost_breakdown.get('monthly_gain', 0) if cost_breakdown else 0
         return {
             "action": "HOLD",
             "target_allocations": request.current_allocations,
             "confidence": 0.5,
-            "reason": f"High migration costs (${total_cost:.2f}) vs monthly gain (${cost_breakdown.get('monthly_gain', 0):.2f}).",
+            "reason": f"Unprofitable: Gas cost (${total_cost:.2f}) exceeds projected monthly gain (${monthly_gain:.2f}).",
             "estimated_gas": total_cost,
             "net_apy_gain": (new_apy - current_apy),
             "metrics": cost_breakdown,
-            "market_context": market_context # Return for UI but don't save to DB
+            "market_context": market_context,
         }
 
-    # If all pass -> REBALANCE
+    # 4. Valid Opportunity
     return {
         "action": "REBALANCE",
         "target_allocations": {best_pool['pool']: capital_usd},
