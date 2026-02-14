@@ -45,12 +45,16 @@ class TimeseriesDB:
             # Migration: Add pool_address if it doesn't exist (handle existing DBs)
             try:
                 cursor = conn.execute("PRAGMA table_info(yield_snapshots)")
-                columns = [info[1] for info in cursor.fetchall()]
-                if 'pool_address' not in columns:
-                    logger.info("Migrating DB: Adding pool_address column to yield_snapshots")
+                existing_columns = [info[1] for info in cursor.fetchall()]
+                logger.debug(f"Current columns in yield_snapshots: {existing_columns}")
+                
+                if 'pool_address' not in existing_columns:
+                    logger.info("⚠️ Migrating DB: Adding pool_address column to yield_snapshots")
                     conn.execute("ALTER TABLE yield_snapshots ADD COLUMN pool_address TEXT")
+                    conn.commit()
+                    logger.info("✅ Migration successful: pool_address added.")
             except Exception as e:
-                logger.warning(f"Migration check failed (could be fresh DB): {e}")
+                logger.error(f"❌ Migration failed: {e}")
 
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_pool_time 
@@ -267,15 +271,28 @@ class TimeseriesDB:
 
     def get_pool_metadata(self, pool_id: str) -> Optional[Dict]:
         """Get metadata (like address and symbol) for a specific pool UUID"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            row = conn.execute("""
-                SELECT pool_id, pool_address, symbol, protocol, chain
-                FROM yield_snapshots
-                WHERE pool_id = ?
-                ORDER BY timestamp DESC LIMIT 1
-            """, (pool_id,)).fetchone()
-        return dict(row) if row else None
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("""
+                    SELECT pool_id, pool_address, symbol, protocol, chain
+                    FROM yield_snapshots
+                    WHERE pool_id = ?
+                    ORDER BY timestamp DESC LIMIT 1
+                """, (pool_id,)).fetchone()
+            return dict(row) if row else None
+        except sqlite3.OperationalError as e:
+            if "no such column: pool_address" in str(e):
+                logger.warning(f"Schema mismatch detected in get_pool_metadata: {e}")
+                # Fallback to symbol-only if address column is missing
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT pool_id, symbol FROM yield_snapshots WHERE pool_id = ? LIMIT 1", (pool_id,)).fetchone()
+                    if row:
+                        res = dict(row)
+                        res['pool_address'] = None
+                        return res
+            return None
 
     def set_pool_address(self, pool_id: str, address: str):
         """Manually map a UUID to a hex address for on-chain features"""
