@@ -366,7 +366,7 @@ with tab1:
             }
             
             try:
-                response = requests.post("http://localhost:8000/inference/predict", json=payload)
+                response = requests.post(f"http://{api_host}:8000/inference/predict", json=payload)
                 if response.status_code != 200:
                     st.error(f"API Error {response.status_code}: {response.text}")
                 else:
