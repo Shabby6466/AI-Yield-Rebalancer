@@ -23,6 +23,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Set PYTHONPATH so 'src' can be imported from /app
+ENV PYTHONPATH=/app
+
 # Copy source code
 COPY . .
 
