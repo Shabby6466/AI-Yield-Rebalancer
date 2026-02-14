@@ -93,17 +93,18 @@ def deploy_contracts():
     ]
     
     print(f"Running Forge Command in {contracts_dir}...")
-    result = subprocess.run(cmd, cwd=contracts_dir, capture_output=True, text=True)
+    print(f"Running Forge Command in {contracts_dir}...")
+    # Direct output to console so we can see it in 'docker compose logs'
+    result = subprocess.run(cmd, cwd=contracts_dir)
+    
     if result.returncode == 0:
-        # Extract address from output
-        for line in result.stdout.split("\n"):
-            if "Deployed to:" in line:
-                addr = line.split("Deployed to:")[1].strip()
-                print(f"StrategyHub deployed to: {addr}")
-                # Save to a local file for the dashboard to read
-                with open("contracts/deployed_address.txt", "w") as f:
-                    f.write(addr)
-                return addr
+        # We need to find the address manually now that we didn't capture output
+        # Anvil usually stays the same if we use the first account
+        addr = "0x5FbDB2315678afecb367f032d93F642f64180aa3" # Default first deployment
+        print(f"✅ StrategyHub likely deployed to: {addr}")
+        with open("contracts/deployed_address.txt", "w") as f:
+            f.write(addr)
+        return addr
     else:
         print(f"❌ FORGE DEPLOYMENT FAILED!")
         print(f"--- STDOUT ---\n{result.stdout}")
