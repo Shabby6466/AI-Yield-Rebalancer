@@ -105,7 +105,9 @@ def deploy_contracts():
                     f.write(addr)
                 return addr
     else:
-        print(f"Deployment failed: {result.stderr}")
+        print(f"❌ FORGE DEPLOYMENT FAILED!")
+        print(f"--- STDOUT ---\n{result.stdout}")
+        print(f"--- STDERR ---\n{result.stderr}")
         return None
 
 if __name__ == "__main__":
