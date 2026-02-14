@@ -240,6 +240,21 @@ class RebalancerService:
             logger.warning(f"Skipping pool {target_pool['symbol']} due to failed ML audit.")
             return
 
+        # 4. Liquidity Concentration Check (Crucial for $2.9M+)
+        # Ensure we don't own more than 5% of the pool to avoid toxic slippage
+        pool_tvl = ml_audit.get('tvl', 0)
+        MAX_CONCENTRATION = 0.05 # 5% Limit
+        
+        if pool_tvl > 1000: # Only check if TVL is reasonably provided
+            concentration = PORTFOLIO_SIZE / pool_tvl
+            if concentration > MAX_CONCENTRATION:
+                logger.warning(f"🚨 REJECTED: Portfolio (${PORTFOLIO_SIZE:,.0f}) is {concentration*100:.1f}% of Pool TVL (${pool_tvl:,.0f}). Max is {MAX_CONCENTRATION*100}%.")
+                await self._record_cycle_prediction(weights, latest_features, forced_type="HOLD", 
+                                            forced_reason=f"[SKIP_CONCENTRATION] Portfolio too large for pool depth ({concentration*100:.1f}% > {MAX_CONCENTRATION*100}%)",
+                                            target_pool=target_pool, safety_report=safety_report,
+                                            ml_audit=ml_audit)
+                return
+
         if ml_audit['risk_level'] == 'high':
             logger.warning(f"ML Audit REJECTED Target {target_pool['symbol']}: {ml_audit['risk_level']} Risk (Liquidity Toxic: {ml_audit.get('liquidity_toxic')})")
             await self._record_cycle_prediction(weights, latest_features, forced_type="ABORTED", 

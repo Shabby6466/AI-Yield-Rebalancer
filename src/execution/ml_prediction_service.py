@@ -350,6 +350,45 @@ class MLPredictionService:
         self.db_logger = DatabaseLogger()
         
         logger.info(f"ML Prediction Service initialized for {network}")
+
+    # Standard ABIs for Protocol Dispatching
+    ERC20_ABI = [
+        {"constant": True, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}], "type": "function"},
+        {"constant": True, "inputs": [{"name": "_owner", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "balance", "type": "uint256"}], "type": "function"}
+    ]
+    
+    AAVE_V3_POOL_ABI = [
+        {
+            "inputs": [{"internalType": "address", "name": "asset", "type": "address"}],
+            "name": "getReserveData",
+            "outputs": [
+                {
+                    "components": [
+                        {"internalType": "uint256", "name": "data", "type": "uint256"},
+                        {"internalType": "uint128", "name": "liquidityIndex", "type": "uint128"},
+                        {"internalType": "uint128", "name": "currentLiquidityRate", "type": "uint128"},
+                        {"internalType": "uint128", "name": "variableBorrowIndex", "type": "uint128"},
+                        {"internalType": "uint128", "name": "currentVariableBorrowRate", "type": "uint128"},
+                        {"internalType": "uint128", "name": "currentStableBorrowRate", "type": "uint128"},
+                        {"internalType": "uint40", "name": "lastUpdateTimestamp", "type": "uint40"},
+                        {"internalType": "uint16", "name": "id", "type": "uint16"},
+                        {"internalType": "address", "name": "aTokenAddress", "type": "address"},
+                        {"internalType": "address", "name": "stableDebtTokenAddress", "type": "address"},
+                        {"internalType": "address", "name": "variableDebtTokenAddress", "type": "address"},
+                        {"internalType": "address", "name": "interestRateStrategyAddress", "type": "address"},
+                        {"internalType": "uint128", "name": "accruedToTreasury", "type": "uint128"},
+                        {"internalType": "uint128", "name": "unbacked", "type": "uint128"},
+                        {"internalType": "uint128", "name": "isolationModeTotalDebt", "type": "uint128"}
+                    ],
+                    "internalType": "struct DataTypes.ReserveData",
+                    "name": "",
+                    "type": "tuple"
+                }
+            ],
+            "stateMutability": "view",
+            "type": "function"
+        }
+    ]
     
     # Verified Ethereum Mainnet Addresses
     VERIFIED_ADDRESSES = {
@@ -397,48 +436,41 @@ class MLPredictionService:
         asset_address = Web3.to_checksum_address(asset_address)
         
         try:
-            # 1. Define Standard ERC20 ABI for decimals
-            erc20_abi = [{"constant": True, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}], "type": "function"}]
-            asset_contract = self.contract_manager.w3.eth.contract(
-                address=asset_address, 
-                abi=erc20_abi
-            )
+            # 1. Standardize to checksum address
+            pool_address = Web3.to_checksum_address(pool_address)
+            asset_address = Web3.to_checksum_address(asset_address)
             
-            # 2. Fetch Decimals (Crucial for TVL and APY scaling)
-            try:
-                decimals = asset_contract.functions.decimals().call()
-            except Exception:
-                decimals = 18  # Fallback to standard
-                logger.warning(f"Could not fetch decimals for {asset_address}, defaulting to 18")
-
-            # 3. Get Strategy Manager and Pool Data
+            # 2. Protocol Identification
             strategy_manager = self.contract_manager.contracts.get('StrategyManager')
-            if not strategy_manager:
-                return {}
-
-            # Calculate poolId as bytes32 (Matches keccak256(abi.encodePacked(asset, pool)))
-            pool_id = self.contract_manager.w3.solidity_keccak(
-                ['address', 'address'], 
-                [asset_address, pool_address]
-            )
+            strategy_manager_addr = strategy_manager.address if strategy_manager else None
             
-            pool_info = strategy_manager.functions.getPool(pool_id).call()
+            # 3. Feature Extraction Dispatcher
+            if pool_address == strategy_manager_addr:
+                return self._fetch_internal_strategy_features(pool_address, asset_address)
             
-            # Check if pool exists (TVL or APY should be non-zero for active pools)
-            if pool_info[4] == 0:  # TVL is 0
-                logger.warning(f"Pool {pool_address} with asset {asset_address} not found in StrategyManager")
-                return {}
+            # External Protocol logic (Aave/Compound/Generic)
+            # Use ERC20 for TVL and protocol-specific for APY
+            token_contract = self.contract_manager.w3.eth.contract(address=asset_address, abi=self.ERC20_ABI)
+            decimals = token_contract.functions.decimals().call()
             
-            # 4. Scale Values Correctly
-            # pool_info[3] is APY in basis points (e.g., 550 = 5.5%)
-            current_apy = float(pool_info[3]) / 100.0
-            
-            # pool_info[4] is TVL in raw units (uint256)
-            tvl_raw = pool_info[4]
+            # Generic TVL: Balance of the pool address
+            tvl_raw = token_contract.functions.balanceOf(pool_address).call()
             tvl_scaled = float(tvl_raw) / (10 ** decimals)
-
-            logger.info(f"Pool: {pool_address[:8]} | APY: {current_apy}% | TVL: ${tvl_scaled:,.2f}")
-
+            
+            # APY Detection
+            current_apy = 0.0
+            if pool_address == '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2': # Aave V3
+                try:
+                    pool_contract = self.contract_manager.w3.eth.contract(address=pool_address, abi=self.AAVE_V3_POOL_ABI)
+                    reserve_data = pool_contract.functions.getReserveData(asset_address).call()
+                    # liquidityRate is expressed in ray (1e27), convert to % APY
+                    # (liquidityRate / 1e27) * 100
+                    current_apy = (float(reserve_data[2]) / 1e27) * 100.0
+                except Exception as e:
+                    logger.warning(f"Failed to fetch Aave APY: {e}")
+            
+            logger.info(f"External Pool: {pool_address[:8]} | APY: {current_apy:.2f}% | TVL: ${tvl_scaled:,.2f}")
+            
             return {
                 'current_apy': current_apy,
                 'tvl': tvl_scaled,
@@ -447,9 +479,44 @@ class MLPredictionService:
                 'pool_address': pool_address,
                 'asset_address': asset_address
             }
-                
+
         except Exception as e:
-            logger.error(f"Critical error fetching pool features: {e}")
+            logger.error(f"❌ Feature Fetch Failed: {e}")
+            return {}
+
+    def _fetch_internal_strategy_features(self, pool_address: str, asset_address: str) -> Dict:
+        """Helper to fetch features from our own StrategyManager"""
+        try:
+            strategy_manager = self.contract_manager.contracts.get('StrategyManager')
+            
+            # 1. Fetch Decimals
+            token_contract = self.contract_manager.w3.eth.contract(address=asset_address, abi=self.ERC20_ABI)
+            decimals = token_contract.functions.decimals().call()
+            
+            # 2. Calculate poolId and Fetch Data
+            pool_id = self.contract_manager.w3.solidity_keccak(
+                ['address', 'address'], 
+                [asset_address, pool_address]
+            )
+            
+            pool_info = strategy_manager.functions.getPool(pool_id).call()
+            
+            if pool_info[4] == 0:  # TVL is 0
+                return {}
+            
+            current_apy = float(pool_info[3]) / 100.0
+            tvl_scaled = float(pool_info[4]) / (10 ** decimals)
+            
+            return {
+                'current_apy': current_apy,
+                'tvl': tvl_scaled,
+                'decimals': decimals,
+                'timestamp': datetime.now().timestamp(),
+                'pool_address': pool_address,
+                'asset_address': asset_address
+            }
+        except Exception as e:
+            logger.error(f"Internal Feature Fetch Error: {e}")
             return {}
     
     def expand_features(self, base_sequence: np.ndarray) -> np.ndarray:
