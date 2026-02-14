@@ -41,6 +41,17 @@ class TimeseriesDB:
                     UNIQUE(pool_id, timestamp)
                 )
             """)
+            
+            # Migration: Add pool_address if it doesn't exist (handle existing DBs)
+            try:
+                cursor = conn.execute("PRAGMA table_info(yield_snapshots)")
+                columns = [info[1] for info in cursor.fetchall()]
+                if 'pool_address' not in columns:
+                    logger.info("Migrating DB: Adding pool_address column to yield_snapshots")
+                    conn.execute("ALTER TABLE yield_snapshots ADD COLUMN pool_address TEXT")
+            except Exception as e:
+                logger.warning(f"Migration check failed (could be fresh DB): {e}")
+
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_pool_time 
                 ON yield_snapshots(pool_id, timestamp)
@@ -72,10 +83,11 @@ class TimeseriesDB:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO yield_snapshots 
-                    (pool_id, timestamp, apy, tvl_usd, chain, protocol, symbol, is_stablecoin)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (pool_id, pool_address, timestamp, apy, tvl_usd, chain, protocol, symbol, is_stablecoin)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     pool_data.get('pool', ''),
+                    pool_data.get('address', pool_data.get('pool_address')),
                     datetime.utcnow().strftime('%Y-%m-%d %H:00:00'),  # Hourly granularity
                     pool_data.get('apy', 0),
                     pool_data.get('tvlUsd', 0),
@@ -106,10 +118,11 @@ class TimeseriesDB:
                     try:
                         conn.execute("""
                             INSERT OR REPLACE INTO yield_snapshots 
-                            (pool_id, timestamp, apy, tvl_usd, chain, protocol, symbol, is_stablecoin)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            (pool_id, pool_address, timestamp, apy, tvl_usd, chain, protocol, symbol, is_stablecoin)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             pool.get('pool', ''),
+                            pool.get('address', pool.get('pool_address')),
                             timestamp,
                             pool.get('apy', 0),
                             pool.get('tvlUsd', 0),
@@ -147,6 +160,8 @@ class TimeseriesDB:
         symbol = metadata.get('symbol', '') if metadata else ''
         is_stable = 1 if metadata and metadata.get('stablecoin', False) else 0
         
+        pool_address = metadata.get('address', metadata.get('pool_address')) if metadata else None
+        
         try:
             with sqlite3.connect(self.db_path) as conn:
                 for point in history:
@@ -158,10 +173,11 @@ class TimeseriesDB:
                         
                         conn.execute("""
                             INSERT OR REPLACE INTO yield_snapshots 
-                            (pool_id, timestamp, apy, tvl_usd, chain, protocol, symbol, is_stablecoin)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            (pool_id, pool_address, timestamp, apy, tvl_usd, chain, protocol, symbol, is_stablecoin)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             pool_id,
+                            pool_address,
                             ts,
                             point.get('apy', 0),
                             point.get('tvlUsd', 0),
