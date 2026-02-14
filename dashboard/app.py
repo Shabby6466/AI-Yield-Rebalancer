@@ -277,20 +277,25 @@ with tab2:
                     net_gain = (p.get('target_pool_apy', 0) or 0) - (p.get('current_pool_apy', 0) or 0)
                     fp2.metric("Net Gain", f"{net_gain:+.2f}%", help="Yield difference (Target - Current APY)")
 
-                    # 2. ROI Period (Days)
+                   # 2. ROI Period (Days)
                     roi_val = metrics.get('roi_days')
-                    
-                    if roi_val is None:
-                         roi_str = "N/A" 
-                    elif roi_val == float('inf'):
-                         roi_str = "Loss" if net_gain < 0 else "Infinite"
-                    elif roi_val > 3650:
-                         roi_str = "> 10 Years"
-                    else:
-                         roi_str = f"{roi_val:.1f} Days"
-                         
-                    fp1.metric("ROI Period", roi_str, help="Time to recover gas/fees")
 
+                    if roi_val is None:
+                        roi_str = "N/A"
+                        label_str = "ROI Period"
+                    elif roi_val == float('inf'):
+                        roi_str = "Loss" if net_gain < 0 else "Infinite"
+                        label_str = "ROI Status"
+                    elif roi_val > 3650:
+                        roi_str = "> 10 Years"
+                        label_str = "ROI Period"
+                    else:
+                        roi_str = "Profitable" 
+                        # Here we move the numeric value into the label string
+                        label_str = f"ROI: {roi_val:.1f} Days"
+
+                        # Use the dynamic label_str instead of a static "ROI Period"
+                        fp1.metric(label_str, roi_str, help="Time to recover gas/fees")
                     # 3. APR (Use Target APY for simplicity as requested)
                     fp3.metric("Target APR", f"{(p.get('target_pool_apy', 0) or 0):.2f}%", help="Projected annual rate")
 
