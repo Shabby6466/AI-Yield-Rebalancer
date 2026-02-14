@@ -367,10 +367,16 @@ class RebalancerService:
                 "stability_score": 0.5, # Default
                 "token_correlation": 0.2
             }
-# ... (rest of function) ...
+            # Call Record Prediction with FULL ARGUMENTS
             self.tracker.record_prediction(
                 prediction_type=prediction_type,
-# ...
+                current_pool_id=override_current_id if override_current_id else self.current_pool_id,
+                current_pool_apy=override_current_apy if override_current_apy else self.current_apy,
+                target_pool_id=target_pool['pool'] if target_pool else "none",
+                target_pool_apy=target_pool['apy'] if target_pool else 0.0,
+                confidence=float(weights[top_idx]),
+                reason=forced_reason if forced_reason else "Autonomous Update",
+                capital_usd=float(os.getenv("PORTFOLIO_SIZE_USD", 100000.0)),
                 market_context={
                     "runner_ups": runner_ups,
                     "target_metadata": target_pool if target_pool else None,
@@ -380,7 +386,6 @@ class RebalancerService:
                     "phase_logs": self.phase_logs,
                     "metrics": metrics
                 },
-# ...
                 volatility_score=float(np.std(features[:, 0])),
                 predicted_apy=target_pool['apy'] if target_pool else float(features[top_idx, 0]),
                 gas_cost=safety_report.get('gas_price', 0) if safety_report else 0
