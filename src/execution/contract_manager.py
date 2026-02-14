@@ -122,28 +122,48 @@ class ContractManager:
                     logger.info(f"✓ Loaded {name}: {address[:10]}...")
     
     def _load_contract_abi(self, contract_name: str):
-        """Load contract ABI from artifacts"""
-        # Map contract names to artifact paths
+        """Load contract ABI from artifacts or Foundry output"""
+        # Hardhat paths
         artifact_paths = {
             'YieldVault': 'artifacts/contracts/core/YieldVault.sol/YieldVault.json',
             'StrategyManager': 'artifacts/contracts/strategies/StrategyManager.sol/StrategyManager.json',
             'RebalanceExecutor': 'artifacts/contracts/core/RebalanceExecutor.sol/RebalanceExecutor.json',
             'AaveAdapter': 'artifacts/contracts/adapters/AaveAdapter.sol/AaveAdapter.json',
-            'UniswapAdapter': 'artifacts/contracts/adapters/UniswapAdapter.sol/UniswapAdapter.json'
+            'UniswapAdapter': 'artifacts/contracts/adapters/UniswapAdapter.sol/UniswapAdapter.json',
+            'StrategyHub': 'contracts/out/StrategyHub.sol/StrategyHub.json'
+        }
+        
+        # Foundry paths (fallback)
+        foundry_paths = {
+            'StrategyHub': 'contracts/out/StrategyHub.sol/StrategyHub.json',
+            'YieldVault': 'contracts/out/YieldVault.sol/YieldVault.json',
+            'StrategyManager': 'contracts/out/StrategyManager.sol/StrategyManager.json',
         }
         
         artifact_path = artifact_paths.get(contract_name)
+        if not artifact_path or not os.path.exists(artifact_path):
+            artifact_path = foundry_paths.get(contract_name)
+            
         if not artifact_path:
             logger.warning(f"Unknown contract: {contract_name}")
             return None
             
         if not os.path.exists(artifact_path):
-            logger.warning(f"ABI file not found: {artifact_path}")
-            return None
+            # Try absolute path if it's running in Docker
+            abs_path = os.path.join('/app', artifact_path)
+            if os.path.exists(abs_path):
+                artifact_path = abs_path
+            else:
+                logger.warning(f"ABI file not found: {artifact_path}")
+                return None
             
         with open(artifact_path, 'r') as f:
             artifact = json.load(f)
-        return artifact['abi']
+            
+        # Foundry and Hardhat have different JSON structures
+        if 'abi' in artifact:
+            return artifact['abi']
+        return artifact  # Some files might be raw ABI JSON
                 
     def deploy_contract(
         self,

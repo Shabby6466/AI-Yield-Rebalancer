@@ -36,15 +36,21 @@ logger = logging.getLogger(__name__)
 class DatabaseLogger:
     """Log predictions and rebalancing to PostgreSQL"""
     
-    def __init__(self, db_name: str = "defi_yield_db"):
+    def __init__(self, db_name: str = "rebalancer"):
         """Initialize database connection"""
         try:
-            # Use peer authentication (no password needed for local connections)
-            self.conn = psycopg2.connect(
-                dbname=db_name,
-                user=os.getenv('DB_USER', os.getenv('USER', 'faizan'))
-            )
-            logger.info(f"✓ Connected to database: {db_name}")
+            db_url = os.getenv('DATABASE_URL')
+            if db_url:
+                self.conn = psycopg2.connect(db_url)
+                logger.info(f"✓ Connected to database via DATABASE_URL")
+            else:
+                # Fallback for local dev
+                self.conn = psycopg2.connect(
+                    dbname=db_name,
+                    user=os.getenv('DB_USER', os.getenv('USER', 'admin')),
+                    password=os.getenv('DB_PASSWORD')
+                )
+                logger.info(f"✓ Connected to database: {db_name}")
         except Exception as e:
             logger.warning(f"Database connection failed: {e}")
             self.conn = None

@@ -80,6 +80,7 @@ services:
       - ETHEREUM_RPC_URL=http://anvil:8545
       - BASE_RPC_URL=http://anvil:8545
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
+      - BRAIN_API_HOST=rebalancer
     volumes:
       - ./data:/app/data
       - ./contracts:/app/contracts

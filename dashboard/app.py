@@ -26,11 +26,12 @@ st.title(" AI Yield Rebalancer: Live Brain Status")
 
 # --- Sidebar ---
 st.sidebar.header("System Status")
+api_host = os.getenv("BRAIN_API_HOST", "localhost")
 try:
-    health = requests.get("http://localhost:8000/health", timeout=2).json()
+    health = requests.get(f"http://{api_host}:8000/health", timeout=2).json()
     st.sidebar.success(f"Brain Online (v{health['version']})")
 except:
-    st.sidebar.error("Brain Offline (Is server.py running?)")
+    st.sidebar.error(f"Brain Offline (Is server.py running?)")
 
 # --- Test Portfolio Section ---
 st.markdown("###  Active Test Portfolio")
