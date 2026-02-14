@@ -294,9 +294,29 @@ with tab2:
                     c_apy = p.get('current_pool_apy', 0) or 0
                     gain = t_apy - c_apy
                     gas_cost = p.get('gas_cost', 0) or 0
-                    mc3.markdown(f"**The Delta**")
+                    st.markdown(f"**The Delta**")
                     mc3.write(f"Net Gain: :green[+{gain:.2f}% APY]")
                     st.caption(f"Profit Velocity: :blue[+${((p.get('capital_usd',100000) or 100000) * gain/100/12):.0f}/mo]")
+
+                    # --- Cost & Profit Analysis (New Section) ---
+                    metrics = ctx.get('metrics', {})
+                    if metrics:
+                        st.divider()
+                        st.markdown("#### 💸 Cost & Profit Analysis")
+                        mp1, mp2, mp3, mp4 = st.columns(4)
+                        
+                        gas = metrics.get('gas_exit',0) + metrics.get('gas_bridge',0) + metrics.get('gas_enter',0)
+                        fees = metrics.get('swap_fees',0)
+                        roi = metrics.get('roi_days', 999)
+                        
+                        mp1.metric("⛽ Gas", f"${gas:.2f}")
+                        mp2.metric("🔄 Fees", f"${fees:.2f}")
+                        mp3.metric("📉 Total Cost", f"${metrics.get('total_conversion_loss', gas+fees):.2f}")
+                        
+                        if roi < 365:
+                            mp4.metric("📅 ROI", f"{roi:.1f} days", delta="Breakeven", delta_color="normal")
+                        else:
+                            mp4.metric("📅 ROI", "> 1 Year", delta="SLOW", delta_color="inverse")
 
                     # Detailed Analysis Charts
                     if st.checkbox(f"View Graphs for Cycle {p.get('id', 0)}", key=f"analysis_{p.get('id', 0)}"):
@@ -314,10 +334,10 @@ with tab2:
                             st.markdown("##### ⛽ Efficiency")
                             monthly_profit = ((p.get('capital_usd',100000) or 100000) * (gain/100) / 12)
                             if monthly_profit > 0:
-                                efficiency = (gas_cost / monthly_profit) * 100
-                                if efficiency < 5: st.success(f"Gas Impact: {efficiency:.1f}%")
-                                elif efficiency < 15: st.warning(f"Gas Impact: {efficiency:.1f}%")
-                                else: st.error(f"Gas Impact: {efficiency:.1f}%")
+                                efficiency = (metrics.get('total_conversion_loss', 0) / monthly_profit) * 100
+                                if efficiency < 5: st.success(f"Cost Impact: {efficiency:.1f}% of monthly gain")
+                                elif efficiency < 15: st.warning(f"Cost Impact: {efficiency:.1f}% of monthly gain")
+                                else: st.error(f"Cost Impact: {efficiency:.1f}% (Too High)")
 
                     st.info(f"**Reason:** {p['reason']}")
         else:
