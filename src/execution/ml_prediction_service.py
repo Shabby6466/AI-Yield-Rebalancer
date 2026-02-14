@@ -467,25 +467,50 @@ class MLPredictionService:
             token_contract = self.contract_manager.w3.eth.contract(address=asset_address, abi=self.ERC20_ABI)
             decimals = token_contract.functions.decimals().call()
             
-            # Generic TVL: Balance of the pool address
-            tvl_raw = token_contract.functions.balanceOf(pool_address).call()
-            tvl_scaled = float(tvl_raw) / (10 ** decimals)
-            
-            # APY Detection
+            # APY Detection & Enhanced TVL for Aave V3
             current_apy = 0.0
+            tvl_scaled = 0.0
             aave_v3_pool = Web3.to_checksum_address('0x87870bca3f3fd6335c3f4ce8392d69350b4fa4e2')
-            if pool_address == aave_v3_pool: # Aave V3
+            
+            if pool_address == aave_v3_pool: # Aave V3 - Special Handling
                 try:
                     pool_contract = self.contract_manager.w3.eth.contract(address=pool_address, abi=self.AAVE_V3_POOL_ABI)
                     reserve_data = pool_contract.functions.getReserveData(asset_address).call()
+                    
                     # liquidityRate is expressed in ray (1e27), convert to % APY
-                    # (liquidityRate / 1e27) * 100
                     current_apy = (float(reserve_data[2]) / 1e27) * 100.0
+                    
+                    # For Aave, TVL = total supply of aToken (not pool's balance)
+                    atoken_address = reserve_data[8]  # aTokenAddress from ReserveData struct
+                    atoken_contract = self.contract_manager.w3.eth.contract(address=atoken_address, abi=self.ERC20_ABI)
+                    total_supply_raw = atoken_contract.functions.totalSupply().call()
+                    tvl_scaled = float(total_supply_raw) / (10 ** decimals)
+                    
+                    logger.info(f"Aave V3 Pool: {pool_address[:8]} | APY: {current_apy:.2f}% | TVL: ${tvl_scaled:,.2f} (via aToken supply)")
                 except Exception as e:
-                    logger.warning(f"Failed to fetch Aave APY: {e}")
+                    logger.error(f"Failed to fetch Aave V3 data: {e}")
+                    # Fallback to generic method
+                    tvl_raw = token_contract.functions.balanceOf(pool_address).call()
+                    tvl_scaled = float(tvl_raw) / (10 ** decimals)
+            else:
+                # Generic TVL: Balance of the pool address
+                tvl_raw = token_contract.functions.balanceOf(pool_address).call()
+                tvl_scaled = float(tvl_raw) / (10 ** decimals)
             
+            # Ghost TVL Detection with Oracle Health Check
             if tvl_scaled == 0:
-                logger.warning(f"🚨 GHOST TVL DETECTED: External Pool {pool_address[:8]} reports $0.00 liquidity on-chain. This may be a vault with indirect holdings or an inactive pool.")
+                logger.warning(f"🚨 GHOST TVL DETECTED: External Pool {pool_address[:8]} reports $0.00 liquidity on-chain.")
+                logger.warning(f"   This may indicate: (1) Vault with indirect holdings, (2) Inactive pool, or (3) RPC/Oracle connection failure.")
+                # Return with ghost_tvl flag for upstream handling
+                return {
+                    'current_apy': current_apy,
+                    'tvl': 0.0,
+                    'decimals': decimals,
+                    'timestamp': datetime.now().timestamp(),
+                    'pool_address': pool_address,
+                    'asset_address': asset_address,
+                    'ghost_tvl': True
+                }
             else:
                 logger.info(f"External Pool: {pool_address[:8]} | APY: {current_apy:.2f}% | TVL: ${tvl_scaled:,.2f}")
             
@@ -495,7 +520,8 @@ class MLPredictionService:
                 'decimals': decimals,
                 'timestamp': datetime.now().timestamp(),
                 'pool_address': pool_address,
-                'asset_address': asset_address
+                'asset_address': asset_address,
+                'ghost_tvl': False
             }
 
         except Exception as e:

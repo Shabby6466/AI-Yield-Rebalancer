@@ -300,6 +300,24 @@ class RebalancerService:
             logger.warning(f"Skipping pool {target_pool['symbol']} due to failed ML audit.")
             return
 
+        # --- ORACLE HEALTH CHECK: System-Wide Halt on Multiple Ghost TVLs ---
+        ghost_count = 0
+        if ml_audit.get('ghost_tvl', False):
+            ghost_count += 1
+        if current_ml_audit and current_ml_audit.get('ghost_tvl', False):
+            ghost_count += 1
+        
+        if ghost_count >= 2:
+            logger.critical("🚨 SYSTEM-WIDE ORACLE FAILURE: Multiple major protocols report $0 TVL.")
+            logger.critical("   This indicates RPC/Web3 provider connection failure or severe network issues.")
+            logger.critical("   HALTING ALL OPERATIONS until connection is restored.")
+            await self._record_cycle_prediction(weights, latest_features, forced_type="ABORTED", 
+                                        forced_reason="[ABORT_ORACLE_FAILURE] System-wide TVL data corruption detected",
+                                        target_pool=target_pool, safety_report=safety_report)
+            return
+        elif ghost_count == 1:
+            logger.warning("⚠️ Oracle Health Warning: 1 pool reporting Ghost TVL. Proceeding with caution.")
+
         # 4. Liquidity Concentration Check (Crucial for $2.9M+)
         # Ensure we don't own more than 5% of the pool to avoid toxic slippage
         pool_tvl = ml_audit.get('tvl', 0)
@@ -439,6 +457,22 @@ class RebalancerService:
         MIN_GAIN_THRESHOLD = 0.75
         
         is_profitable = (apy_gain >= MIN_GAIN_THRESHOLD and net_profit_usd > 0)
+        
+        # --- FRAGMENTED EXIT DETECTION: Large Portfolio Slippage Trap ---
+        CRITICAL_SLIPPAGE_THRESHOLD = Decimal("0.05")  # 5%
+        LARGE_PORTFOLIO_THRESHOLD = Decimal("1000000")  # $1M
+        
+        if is_liquidity_emergency and estimated_slippage > CRITICAL_SLIPPAGE_THRESHOLD and PORTFOLIO_SIZE > LARGE_PORTFOLIO_THRESHOLD:
+            logger.critical(f"🚨 FRAGMENTED EXIT REQUIRED: Portfolio (${float(PORTFOLIO_SIZE):,.0f}) too large for single-block exit.")
+            logger.critical(f"   Estimated Slippage: {float(estimated_slippage):.2%} would cost ${float(PORTFOLIO_SIZE * estimated_slippage):,.0f}")
+            logger.critical(f"   RECOMMENDATION: Break withdrawal into tranches of $100k every 30 minutes.")
+            logger.critical(f"   This allows arbitrageurs to refill liquidity and reduces total slippage to <1%.")
+            # For now, we abort the single-block exit to prevent catastrophic loss
+            await self._record_cycle_prediction(weights, latest_features, forced_type="ABORTED", 
+                                        forced_reason=f"[ABORT_FRAGMENTED_EXIT_NEEDED] Slippage {float(estimated_slippage):.2%} too high for ${float(PORTFOLIO_SIZE):,.0f} exit",
+                                        target_pool=target_pool, safety_report=safety_report,
+                                        ml_audit=ml_audit, metrics=financial_metrics)
+            return
         
         if not is_profitable and not is_defensive_move and not is_liquidity_emergency:
             reason = f"Costs > Gain" if net_profit_usd <= 0 else f"Low Gain {apy_gain:.2f}% < {MIN_GAIN_THRESHOLD}%"
@@ -687,6 +721,12 @@ class RebalancerService:
         try:
             # Estimate gas on-chain
             estimated_gas = self.w3.eth.estimate_gas(rebalance_tx)
+            
+            # Sanity Check: DeFi transactions should be 300k-600k gas
+            if estimated_gas < 100000:
+                logger.warning(f"   - Gas estimate ({estimated_gas}) suspiciously low for DeFi tx. Using safe minimum of 350,000.")
+                estimated_gas = 350000
+            
             # Add 20% buffer for complex state changes
             rebalance_tx['gas'] = int(estimated_gas * 1.2)
             logger.info(f"   - Estimated Gas: {estimated_gas} (Limit set to {rebalance_tx['gas']} with 20% buffer)")
