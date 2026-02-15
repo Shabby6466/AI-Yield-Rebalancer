@@ -13,9 +13,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Foundry (Anvil/Forge) for the Simulation Lab
-RUN curl -L https://foundry.paradigm.xyz | bash
+# We add a retry loop because foundryup can be flaky on server networks
+RUN curl -L https://foundry.paradigm.xyz | bash && \
+    export PATH="/root/.foundry/bin:${PATH}" && \
+    (foundryup || foundryup || foundryup)
 ENV PATH="/root/.foundry/bin:${PATH}"
-RUN foundryup
 
 # Set working directory
 WORKDIR /app
