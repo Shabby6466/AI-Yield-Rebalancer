@@ -30,17 +30,23 @@ services:
   # 2. On-Chain Environment (Anvil Mainnet Fork)
   anvil:
     build: .
-    command: anvil --fork-url https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY} --host 0.0.0.0 --port 8545
+    command: python3 -u scripts/auto_fork_manager.py
     ports:
       - "8545:8545"
     logging: *default-logging
     environment:
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
+      - KEEPER_PRIVATE_KEY=${KEEPER_PRIVATE_KEY}
+      - RPC_URL=http://localhost:8545
+    volumes:
+      - .:/app
+      - ./contracts:/app/contracts
+      - ./deployments:/app/deployments
     healthcheck:
       test: [ "CMD-SHELL", "curl -f -X POST -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' http://localhost:8545 || exit 1" ]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   # 3. AI Rebalancer Engine (The Backend)
   rebalancer:

@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import time
 from typing import Dict, List
 from src.data.chainlink_client import ChainlinkClient # Assuming we implement this next
@@ -55,6 +56,18 @@ class CircuitBreaker:
             return False, report
             
         return True, report
+
+    async def estimate_rebalance_gas(self, current_pool: str, target_pool: str, project: str) -> float:
+        """Estimate gas cost for a full swap/rebalance flow (USD)."""
+        # Baseline gas for withdrawing (200k) + swap (200k) + deposit (200k)
+        # For POC, use 600k units as a safe average
+        gas_limit = 600000
+        try:
+            gas_price_wei = await asyncio.to_thread(getattr, self.w3.eth, 'gas_price')
+            gas_cost_eth = (gas_limit * gas_price_wei) / 10**18
+            return float(gas_cost_eth) * 2500.0 # Default ETH price for standalone estimation
+        except:
+            return 50.0 # Fallback $50 gas
 
     def _check_pegs(self) -> bool:
         """Integration with Chainlink to verify USDC/DAI/USDT stays near $1."""

@@ -272,6 +272,27 @@ class PredictionTracker:
                 "SELECT COALESCE(SUM(profit_if_followed), 0) FROM predictions WHERE validated = 1"
             ).fetchone()[0]
             
+            # Sum of Gas + Slippage (Friction)
+            total_friction = conn.execute(
+                "SELECT COALESCE(SUM(gas_cost + slippage), 0) FROM predictions"
+            ).fetchone()[0]
+            
+            # Fetch latest ROI from market_context
+            latest_row = conn.execute(
+                "SELECT market_context FROM predictions ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            
+            net_roi_pct = 0.0
+            total_savings = 0.0
+            if latest_row and latest_row[0]:
+                try:
+                    ctx = json.loads(latest_row[0])
+                    metrics = ctx.get('metrics', {})
+                    net_roi_pct = metrics.get('net_roi_pct', 0.0)
+                    total_savings = metrics.get('wait_savings', 0.0)
+                except:
+                    pass
+
             # By type
             hold_correct = conn.execute(
                 "SELECT COUNT(*) FROM predictions WHERE validated = 1 AND was_correct = 1 AND prediction_type = 'HOLD'"
@@ -299,7 +320,10 @@ class PredictionTracker:
             "accuracy_pct": round(accuracy, 1),
             "hold_accuracy_pct": round(hold_accuracy, 1),
             "rebalance_accuracy_pct": round(rebalance_accuracy, 1),
-            "total_profit_if_followed": round(total_profit, 2)
+            "total_profit_if_followed": round(total_profit, 2),
+            "total_friction": round(total_friction, 2),
+            "net_roi_pct": round(net_roi_pct, 2),
+            "total_savings": round(total_savings, 2)
         }
 
     def get_all_predictions(self, limit: int = 50) -> List[Dict]:

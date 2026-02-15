@@ -245,6 +245,21 @@ CREATE TABLE IF NOT EXISTS data_quality_logs (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Drift events for Uniswap V3
+CREATE TABLE IF NOT EXISTS drift_events (
+    id SERIAL PRIMARY KEY,
+    pool_address VARCHAR(255) NOT NULL,
+    tick_lower INT NOT NULL,
+    tick_upper INT NOT NULL,
+    current_tick INT NOT NULL,
+    severity VARCHAR(20) NOT NULL, -- 'info', 'warning', 'critical'
+    message TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_drift_events_pool ON drift_events (pool_address, timestamp DESC);
+CREATE INDEX idx_drift_events_timestamp ON drift_events (timestamp DESC);
+
 -- ============================================================================
 -- Audit & Logging Tables
 -- ============================================================================

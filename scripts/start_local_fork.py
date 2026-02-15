@@ -150,9 +150,9 @@ def fund_keeper(target_address=None):
     # But wait, the script doesn't know the address easily without eth-account.
     # Let's rely on the one from logs for now as a fallback, or try to read it.
     
-    deployer_pk = os.getenv("DEPLOYER_PRIVATE_KEY")
+    deployer_pk = os.getenv("KEEPER_PRIVATE_KEY")
     if not deployer_pk:
-        print("⚠️ No DEPLOYER_PRIVATE_KEY found. Skipping funding.")
+        print("⚠️ No KEEPER_PRIVATE_KEY found. Skipping funding.")
         return
 
     # Use cast to get address

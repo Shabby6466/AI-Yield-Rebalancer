@@ -43,7 +43,7 @@ class ContractManager:
             "mainnet": os.getenv("ETHEREUM_RPC_URL"),
             "ethereum": os.getenv("RPC_URL"), # For fork mode, RPC_URL is often used
             "base": os.getenv("BASE_RPC_URL"),
-            "local": "http://anvil:8545" # Internal docker DNS
+            "local": os.getenv("RPC_URL", "http://localhost:8545") # Localhost or Docker env
         }
         
         rpc_url = rpc_urls.get(self.network)
@@ -67,9 +67,9 @@ class ContractManager:
         
     def _setup_account(self) -> Account:
         """Setup account from private key"""
-        private_key = os.getenv("DEPLOYER_PRIVATE_KEY")
+        private_key = os.getenv("DEPLOYER_PRIVATE_KEY") or os.getenv("KEEPER_PRIVATE_KEY")
         if not private_key:
-            raise ValueError("DEPLOYER_PRIVATE_KEY not set in .env")
+             raise ValueError("DEPLOYER_PRIVATE_KEY or KEEPER_PRIVATE_KEY not set in .env")
             
         account = Account.from_key(private_key)
         balance = self.w3.eth.get_balance(account.address)

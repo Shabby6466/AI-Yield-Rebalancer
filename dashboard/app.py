@@ -14,15 +14,60 @@ from web3 import Web3
 from eth_account import Account
 import json
 import os
+from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 
-# Auto-refresh the page every 30 seconds to keep stats live without manual refresh
-# This helps in monitoring the rebalancer's logs and predictions in real-time.
-st_autorefresh(interval=30 * 1000, key="datarefresh")
+# Auto-refresh the page every 2 seconds to keep stats live without manual refresh
+# This is crucial for local testing where cycles are fast.
+st_autorefresh(interval=5000, key="datarefresh")
+
+# Manual Refresh override
+if st.sidebar.button("🔄 Refresh Data"):
+    st.rerun()
 
 st.set_page_config(page_title="AI Yield Brain - Live Status", layout="wide")
 
-st.title(" AI Yield Rebalancer: Live Brain Status")
+# --- Premium Styling ---
+st.markdown("""
+    <style>
+    .main {
+        background: #0e1117;
+    }
+    .stMetric {
+        background: rgba(49, 51, 63, 0.4);
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    div[data-testid="stExpander"] {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        background: rgba(49, 51, 63, 0.2);
+    }
+    .stButton>button {
+        border-radius: 5px;
+        font-weight: bold;
+        transition: all 0.3s;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(0, 178, 255, 0.4);
+    }
+    h1, h2, h3 {
+        color: #00b2ff !important;
+        font-family: 'Outfit', sans-serif;
+    }
+    .status-badge {
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-weight: bold;
+        text-transform: uppercase;
+        font-size: 0.8em;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("AI Yield Rebalancer: SMART Control Tower")
 
 # --- Sidebar ---
 st.sidebar.header("System Status")
@@ -35,46 +80,91 @@ except:
 
 # --- Wallet Status Section ---
 st.sidebar.markdown("---")
-st.sidebar.subheader("🤖 Agent Wallet")
+st.sidebar.subheader(" Agent Wallet")
+
+# Initialize latest_preds to ensure it exists for Tab 1
+latest_preds = []
 
 try:
-    # Connect to DB to get latest state
+    # 1. Fetch Predictions (Critical for Context)
     tracker = PredictionTracker()
     latest_preds = tracker.get_all_predictions(limit=1)
     
-    if latest_preds:
+    # 2. Fetch Wallet Snapshot (Persistence)
+    wallet_snap = None
+    try:
+        db = TimeseriesDB()
+        if hasattr(db, 'get_latest_wallet_snapshot'):
+            wallet_snap = db.get_latest_wallet_snapshot()
+    except Exception as e:
+        st.sidebar.warning(f"DB Connection Issue: {e}")
+
+    # --- Display Wallet Section ---
+    if wallet_snap:
+        # A. Use Snapshot Data (Preferred)
+        total_value = wallet_snap['total_usd']
+        st.sidebar.markdown(f"### Total: **${total_value:,.2f}**")
+        
+        eth_bal = wallet_snap['eth_balance']
+        st.sidebar.metric("⛽ Gas Tank", f"{eth_bal:.4f} ETH", help="Used for transaction fees")
+
+        assets = wallet_snap['assets']
+        if assets:
+            with st.sidebar.expander("Asset Breakdown", expanded=True):
+                valid_assets = [a for a in assets if a['value_usd'] > 1.0]
+                if valid_assets:
+                    df_assets = pd.DataFrame(valid_assets)
+                    df_assets['Balance'] = df_assets['balance'].map(lambda x: f"{x:.4f}")
+                    df_assets['Value'] = df_assets['value_usd'].map(lambda x: f"${x:,.2f}")
+                    st.table(df_assets[['symbol', 'Balance', 'Value']])
+                else:
+                    st.sidebar.caption("No significant assets found.")
+    
+    elif latest_preds:
+        # B. Fallback to Cycle Data (If snapshot missing)
         latest = latest_preds[0]
-        try:
-            ctx = json.loads(latest['market_context']) if latest.get('market_context') else {}
-            if not isinstance(ctx, dict): ctx = {}
-        except:
-            ctx = {}
+        st.sidebar.info("Using Cycle Data (Snapshot missing)")
         
+        # Try to extract total value from context
+        ctx = json.loads(latest.get('market_context', '{}'))
         metrics = ctx.get('metrics', {})
-        if not isinstance(metrics, dict): metrics = {}
-        
-        # 1. Balance
-        # Default to 0 if not yet recorded in latest cycle
-        balance = metrics.get('wallet_balance_eth', 0.0)
-        st.sidebar.metric("ETH Balance", f"{balance:.4f} ETH")
-        
-        # 2. Current Position
-        current_pool = latest.get('current_pool_id', 'Unknown')
-        # Try to get symbol if available
-        if ctx.get('current_pool_symbol'):
-            current_pool = ctx['current_pool_symbol']
-            
-        st.sidebar.metric("Active Strategy", current_pool)
-        
-        # 3. Last Heartbeat
-        last_time = latest.get('timestamp', '').split('T')[-1][:5]
-        st.sidebar.caption(f"Last Update: {last_time} UTC")
+        total_value = metrics.get('total_portfolio_usd', latest.get('capital_usd', 0.0))
+        st.sidebar.markdown(f"### Total: **${float(total_value):,.2f}**")
         
     else:
-        st.sidebar.warning("No Agent History Found")
+        st.sidebar.warning("No Wallet/Agent History Found.")
+
+    # --- Signals & Config ---
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ Agent Controls")
+
+    if latest_preds:
+        latest = latest_preds[0]
+        ctx = json.loads(latest.get('market_context', '{}'))
+        metrics = ctx.get('metrics', {}) or {}
         
+        # Active Pool
+        current_pool = "Starting..."
+        if ctx.get('current_pool_symbol'):
+            current_pool = ctx['current_pool_symbol']
+        st.sidebar.metric("Active Strategy", current_pool)
+        
+        # SMART Status
+        status = metrics.get('drift_status', 'HEALTHY')
+        status_icon = "🟢" if status == "HEALTHY" else ("🟡" if status == "COOLING" else ("🔍" if status == "AUDITING" else "🚀"))
+        st.sidebar.markdown(f"**SMART Status**: {status_icon} {status}")
+
+    # Preferences
+    with st.sidebar.expander("Risk Parameters", expanded=False):
+        risk_tol = st.slider("Risk Tolerance", 0.1, 1.0, 0.8)
+        min_gain = st.slider("Min Yield Gain (%)", 0.0, 10.0, 1.0)
+        max_slip = st.slider("Max Slippage (%)", 0.1, 5.0, 2.0)
+        max_gas = st.number_input("Max Gas (Gwei)", 10, 500, 50)
+        if st.button("Update Config"):
+            st.success("Config Updated")
+
 except Exception as e:
-    st.sidebar.error(f"Wallet Error: {str(e)}")
+    st.sidebar.error(f"Sidebar Error: {str(e)}")
 
 # --- Test Portfolio Section ---
 st.markdown("###  Active Test Portfolio")
@@ -211,7 +301,7 @@ with st.sidebar:
                 [sys.executable, "-m", "src.scheduler.collector", "--once"],
                 capture_output=True, text=True, timeout=30,
                 stdin=subprocess.DEVNULL,
-                cwd="/app"
+                cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
             )
             if result.returncode == 0:
                 st.success("Data refreshed!")
@@ -224,46 +314,37 @@ with st.sidebar:
         st.caption(f"Last update: {last_ts} UTC")
 
 # --- Tabs Layout ---
-tab1, tab2, tab3, tab4 = st.tabs([
-    "🧠 AI Decision Engine", 
-    "📡 Autonomous Monitor",
-    "📈 Analysis & Backtest", 
-    "🧪 Simulation Lab"
+tab1, tab2, tab3 = st.tabs([
+    " AI Decision Engine", 
+    " Autonomous Monitor",
+    " System Logs"
 ])
 
 with tab2:
+    
     with st.expander("ℹ️ How it works: Autonomous Monitor"):
         st.markdown("""
         **What it is:** The real-time operations center for the AI Yield Rebalancer service. 
         **How it works:** 
         1. **Live Feed:** Directly tails the `rebalancer.log` to show you exactly what the AI is thinking *right now*.
         2. **Atomic Lifecycle Log:** Every decision (SUCCESS, HOLD, or ABORT) is recorded with a 4-phase audit trail:
-           - 🔍 **Phase 1 (Opportunity Gap):** Identifying yield differentials in the market.
-           - 📊 **Phase 2 (Go/No-Go):** Calculating gas, slippage, and ROI to ensure profitability.
-           - ⚡ **Phase 3 (Atomic Execution):** The Flashbots/Anvil transaction sequence.
-           - 💓 **Phase 4 (Monitoring):** Post-execution health checks and trend tracking.
+           - **Phase 1 (Opportunity Gap):** Identifying yield differentials in the market.
+           - **Phase 2 (Go/No-Go):** Calculating gas, slippage, and ROI to ensure profitability.
+           - **Phase 3 (Atomic Execution):** The Flashbots/Anvil transaction sequence.
+           - **Phase 4 (Monitoring):** Post-execution health checks and trend tracking.
         """)
-    st.markdown("### 📡 Autonomous Rebalancer Monitor")
+    st.markdown("###  Autonomous Rebalancer Monitor")
     st.caption("Real-time monitoring of the autonomous rebalancer service during the long-duration test.")
 
     try:
         tracker = PredictionTracker()
         accuracy = tracker.get_accuracy_stats()
         
-        # Dashboard Overview
-        lc1, lc2, lc3, lc4 = st.columns(4)
-        lc1.metric("Cycles Processed", accuracy['total_predictions'])
-        
-        # Get latest for status
-        latest_preds = tracker.get_all_predictions(limit=1)
-        latest_status = latest_preds[0]['prediction_type'] if latest_preds else "Idle"
-        lc2.metric("Latest Status", latest_status)
-        
-        lc3.metric("System Uptime", "Active")
-        lc4.metric("Accuracy (7d)", f"{accuracy['accuracy_pct']}%")
+        db = TimeseriesDB()
 
         # Prediction Feed
         st.markdown("#### Autonomous Decision Feed")
+        st.caption(f"Live Feed • Last Polled: {datetime.utcnow().strftime('%H:%M:%S')} UTC")
         
         if "feed_limit" not in st.session_state:
             st.session_state["feed_limit"] = 15
@@ -289,27 +370,6 @@ with tab2:
                     # Fix logical ghost: Use context's current_pool_symbol
                     cur_sym = ctx.get('current_pool_symbol', 'CASH')
 
-                    # Row 1: Dashboard Overlays
-                    st.markdown(f"#### 🧠 Brain Intelligence (Confidence: {p.get('confidence',0)*100:.1f}%)")
-                    c1, c2, c3 = st.columns(3)
-                    
-                    # A. Inference Factors
-                    with c1:
-                        st.markdown("**Inference Factors**")
-                        cb = ctx.get('confidence_breakdown', {})
-                        st.caption(f"📈 Yield Momentum: {cb.get('yield_momentum', 0.5):.2f}")
-                        st.caption(f"🛡️ Stability Score: {cb.get('stability_score', 0.5):.2f}")
-                        st.caption(f"🔗 Correlation: {cb.get('token_correlation', 0.2):.2f}")
-                    
-                  
-                    # C. Market Depth
-                    with c2:
-                        st.markdown("**Market Depth**")
-                        tm = ctx.get('target_metadata', {})
-                        st.caption(f"💰 TVL: ${tm.get('tvlUsd',0)/1e6:.1f}M")
-                        st.caption(f"🔄 Route: 1inch Aggregator")
-
-                    st.divider()
                     
                     # --- NEW: Financial Performance (User Requested) ---
                     st.markdown("#### 💸 Financial Performance")
@@ -318,16 +378,18 @@ with tab2:
                     metrics = ctx.get('metrics', {})
                     if not isinstance(metrics, dict): metrics = {}
                     
-                    # 0. Dynamic Managed Capital
-                    capital = p.get('capital_usd', 100000.0)
-                    fp0.metric("Managed Capital", f"${capital:,.0f}", help="Real portfolio size used for AI decision math")
 
-                    # 1. Net Gain (APY %) (Moved Up)
-                    net_gain = (p.get('target_pool_apy', 0) or 0) - (p.get('current_pool_apy', 0) or 0)
-                    fp2.metric("Net Gain", f"{net_gain:+.2f}%", help="Yield difference (Target - Current APY)")
+                    # 1. Net ROI % (The User's Requested ROI)
+                    net_roi = metrics.get('net_roi_pct', 0.0)
+                    fp0.metric("Net ROI", f"{net_roi:+.5f}%", help="Total return vs Initial Capital after all fees")
 
-                    # 2. ROI Period (Days)
-                    raw_roi = metrics.get('roi_days')
+                    # 2. Net Gain (Yield Gap)
+                    net_gain = (p.get('target_pool_apy', 0)) - (p.get('current_pool_apy', 0))
+                    gain_label = "TVL"
+                    fp1.metric(gain_label, f"{p.get('current_pool_tvl', 0):.2f}")
+
+                    # 3. ROI Period (Days)
+                    raw_roi = metrics.get('roi_days') or metrics.get('break_even_days')
                     
                     # Safe Type Conversion
                     try:
@@ -341,41 +403,64 @@ with tab2:
                     # Logic
                     if roi_val is None:
                         roi_str = "N/A"
-                        label_str = "ROI Period"
+                        label_str = "Break-Even"
                     elif roi_val == float('inf') or roi_val == float('-inf'):
                         roi_str = "Loss" if net_gain < 0 else "Infinite"
-                        label_str = "ROI Status"
+                        label_str = "Status"
                     elif roi_val > 3650:
                         roi_str = "> 10 Years"
-                        label_str = "ROI Period"
+                        label_str = "Break-Even"
                     else:
                         roi_str = f"{roi_val:.1f} Days"
-                        label_str = "ROI Period"
+                        label_str = "Break-Even"
 
-                    fp1.metric(label_str, roi_str, help="Time to recover gas/fees")
-                    # 3. APR (Use Target APY for simplicity as requested)
-                    fp3.metric("Target APR", f"{(p.get('target_pool_apy', 0) or 0):.2f}%", help="Projected annual rate")
+                    fp2.metric(label_str, roi_str)
+                    
+                    # 4. Target APY
+                    fp3.metric("Target APY", f"{(p.get('target_pool_apy', 0)):.1f}%")
 
-                    # 4. Pool Impact (Slippage)
-                    # Try to get slippage, default 0.05%
+                    # 5. Pool Impact (Slippage)
                     impact = metrics.get('estimated_slippage', 0.0005)
-                    fp4.metric("Pool Impact", f"-{impact*100:.2f}%", help="Estimated price impact on liquidity pool")
+                    fp4.metric("Slippage", f"-{impact*100:.2f}%")
+                    
+                    # --- Cost & Profit Analysis (New Section) ---
+                    metrics = ctx.get('metrics', {})
+                    if not isinstance(metrics, dict): metrics = {}
+                    
+                    gas = sum([metrics.get(k, 0) for k in ['gas_exit', 'gas_bridge', 'gas_enter']])
+                    fees = metrics.get('swap_fees', 0)
+                    roi = metrics.get('roi_days')
 
-                    st.divider()
+                    if status in ["ABORTED", "HOLD"] and gas == 0 and fees == 0:
+                        st.info("**No Friction**: Execution was aborted before transaction scheduling. No gas or swap fees were modeled.")
+                    elif gas > 0 or fees > 0:
+                        st.divider()
+                        st.markdown("#### 💸 Cost & Profit Analysis")
+                        mp1, mp2, mp3, mp4 = st.columns(4)
+                        
+                        mp1.metric("⛽ Gas", f"${gas:.2f}")
+                        mp2.metric("🔄 Fees", f"${fees:.2f}")
+                        mp3.metric("📉 Total Cost", f"${metrics.get('total_conversion_loss', gas+fees):.2f}")
+                        
+                        if roi is not None and roi < 365:
+                            mp4.metric("📅 ROI", f"{roi:.1f} days", delta="Breakeven", delta_color="normal")
+                        else:
+                            mp4.metric("📅 ROI", "N/A" if roi is None else "> 1 Year", delta="Computation" if roi is None else "SLOW", delta_color="off")
 
                     # Row 2: Comparison Matrix
-                    st.markdown("#### ⚖️ Comparison Matrix")
+                    st.markdown("#### Comparison ")
                     mc1, mc2, mc3 = st.columns(3)
                     
                     # Current
                     mc1.markdown(f"**Current: {cur_sym}**")
-                    mc1.write(f"APY: {(p.get('current_pool_apy', 0) or 0):.2f}%")
+                    mc1.write(f"APY: {(p.get('current_pool_apy', 0)):.2f}%")
                     
                     # Target
                     target_meta = ctx.get('target_metadata', {})
+                    if not isinstance(target_meta, dict): target_meta = {}
                     target_symbol = target_meta.get('symbol', 'Unknown')
                     mc2.markdown(f"**Target: {target_symbol}**")
-                    mc2.write(f"APY: {(p.get('target_pool_apy', 0) or 0):.2f}%")
+                    mc2.write(f"APY: {(p.get('target_pool_apy')):.2f}%")
 
                     # Phase Log
                     if ctx.get('phase_logs'):
@@ -390,35 +475,13 @@ with tab2:
                             else: st.write(log)
                     
                     # Delta
-                    t_apy = p.get('target_pool_apy', 0) or 0
-                    c_apy = p.get('current_pool_apy', 0) or 0
+                    t_apy = p.get('target_pool_apy', 0)
+                    c_apy = p.get('current_pool_apy', 0)
                     gain = t_apy - c_apy
-                    gas_cost = p.get('gas_cost', 0) or 0
-                    st.markdown(f"**The Delta**")
+                    gas_cost = p.get('gas_cost', 0)
                     mc3.write(f"Net Gain: :green[+{gain:.2f}% APY]")
-                    st.caption(f"Profit Velocity: :blue[+${((p.get('capital_usd',100000) or 100000) * gain/100/12):.0f}/mo]")
 
-                    # --- Cost & Profit Analysis (New Section) ---
-                    metrics = ctx.get('metrics', {})
-                    if not isinstance(metrics, dict): metrics = {}
-                    if metrics:
-                        st.divider()
-                        st.markdown("#### 💸 Cost & Profit Analysis")
-                        mp1, mp2, mp3, mp4 = st.columns(4)
-                        
-                        gas = metrics.get('gas_exit',0) + metrics.get('gas_bridge',0) + metrics.get('gas_enter',0)
-                        fees = metrics.get('swap_fees',0)
-                        roi = metrics.get('roi_days', 999)
-                        
-                        mp1.metric("⛽ Gas", f"${gas:.2f}")
-                        mp2.metric("🔄 Fees", f"${fees:.2f}")
-                        mp3.metric("📉 Total Cost", f"${metrics.get('total_conversion_loss', gas+fees):.2f}")
-                        
-                        if roi < 365:
-                            mp4.metric("📅 ROI", f"{roi:.1f} days", delta="Breakeven", delta_color="normal")
-                        else:
-                            mp4.metric("📅 ROI", "> 1 Year", delta="SLOW", delta_color="inverse")
-
+                  
                     # Detailed Analysis Charts
                     if st.checkbox(f"View Graphs for Cycle {p.get('id', 0)}", key=f"analysis_{p.get('id', 0)}"):
                         dc1, dc2 = st.columns(2)
@@ -439,6 +502,17 @@ with tab2:
                                 if efficiency < 5: st.success(f"Cost Impact: {efficiency:.1f}% of monthly gain")
                                 elif efficiency < 15: st.warning(f"Cost Impact: {efficiency:.1f}% of monthly gain")
                                 else: st.error(f"Cost Impact: {efficiency:.1f}% (Too High)")
+
+                    # --- NEW: Execution Monitor (Block & Method) ---
+                    st.markdown("#### 🛠️ Execution Monitor")
+                    em1, em2, em3 = st.columns(3)
+                    # Fallback to heartbeat block if execution didn't happen
+                    block = metrics.get('execution_block') or metrics.get('heartbeat_block') or 'N/A'
+                    method = metrics.get('execution_method', 'HOLD' if status == "ABORTED" else "SWAP")
+                    
+                    em1.metric("Status Block", str(block))
+                    em2.metric("Execution Method", method)
+                    em3.metric("Signal Status", "LIVE" if status == "SUCCESS" else "SIMULATED")
 
                     st.info(f"**Reason:** {p['reason']}")
             
@@ -468,22 +542,61 @@ with tab2:
         st.error(f"Failed to load stability test data: {e}")
 
 with tab1:
-    with st.expander("ℹ️ How it works: AI Decision Engine"):
-        st.markdown("""
-        **What it is:** A high-fidelity sandbox for manual asset comparison and strategy validation.
-        **How it works:**
-        1. **Live Inference:** Select any two assets to trigger a real-time call to the AI Inference Engine.
-        2. **Risk Scrutiny:** The AI runs a 'Risk Scorecard' analyzing 30-day volatility, Sharpe Ratios, and Yield Decay.
-        3. **Cost Sensitivity:** It calculates a full 'ROI Break-even' period by factoring in live Gas prices and expected Slippage for your specific portfolio size.
-        4. **Multi-Pool Sizing:** Use the **Trade Sizer** tool to calculate a diversified allocation (Max Pools / Max Cap) to minimize single-protocol risk.
-        """)
+    # Fetch AI Advice from latest prediction
+    advice_text = "AI is currently auditing the market. Wait for the next heartbeat."
+    if latest_preds:
+        last = latest_preds[0]
+        ctx = json.loads(last['market_context']) if last.get('market_context') else {}
+        metrics = ctx.get('metrics', {})
+        if not isinstance(metrics, dict): metrics = {}
+        
+        # Generate Human Readable Advice
+        if last['prediction_type'] == "HOLD":
+            advice_text = f"**AI SUGESTS WAIT.** {last['reason']}. Movement now would incur ${metrics.get('total_costs_usd', 0):.2f} in friction for only {last.get('target_pool_apy', 0) - last.get('current_pool_apy', 0):+.2f}% yield gain."
+        elif last['prediction_type'] == "REBALANCE":
+            advice_text = f"**AI SUGGESTS REBALANCE.** {last['reason']}. Projected break-even: {metrics.get('break_even_days', 0):.1f} days."
+        else:
+            # Handle Aborted/Emergency states
+            r_msg = last['reason']
+            if "[Liquidity Toxic]" in r_msg or "Slippage too high" in r_msg:
+                advice_text = f"**LIQUIDITY TRAP detected.** AI blocked a move because the target pool is too shallow for your portfolio size. Rebalancing now would cause excessive slippage."
+            elif "[ABORT_ORACLE_FAILURE]" in r_msg:
+                advice_text = "**ORACLE FAILURE.** Protocols reporting $0 TVL. Halting for data integrity."
+            else:
+                advice_text = f"{r_msg}"
+
+    st.markdown(f"""
+        <div style="background: rgba(255, 255, 255, 0.05); padding: 25px; border-radius: 10px; margin-top: 20px; border: 1px solid rgba(255,255,255,0.1);">
+            <h2 style="margin-top:0;"> Last ML Decision</h2>
+            <p style="font-size:1.1em; line-height:1.6;">{advice_text}</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("Manual Sandbox")
+    sandbox_cols = st.columns([2, 1])
+    with sandbox_cols[0]:
+        st.info("Adjust parameters to see how AI recaluclates Net ROI in real-time.")
+        s_target = st.selectbox("Simulate Target", pool_names, index=0, key="sb_target")
+        s_cap = st.slider("Simulate Portfoio Size ($)", 1000, 1000000, int(capital_input), key="sb_cap")
+    
+    with sandbox_cols[1]:
+        st.markdown("#### Real-time Recalc")
+        # Dummy recalc for sandbox
+        t_pool = next((p for p in valid_pools if p['name'] == s_target), None)
+        c_pool = next((p for p in valid_pools if p['id'] == current_asset_id), None)
+        if t_pool and c_pool:
+            gain = float(t_pool['apy'] or 0) - float(c_pool['apy'] or 0)
+            st.write(f"Yield Delta: **{gain:+.2f}%**")
+            st.write(f"Est. Monthly Gain: **${(s_cap * gain / 100 / 12):,.2f}**")
+            st.button("🚀 Execute on Fork", disabled=True, help="Disabled in monitor mode")
     
     col_ask1, col_ask2 = st.columns([3, 1])
     with col_ask2:
         force_exec = st.checkbox("Force Executive Override", help="Simulate a forced rebalance (Bypass Risk Checks)")
     
     with col_ask1:
-        if st.button("🧠 Ask Brain for Decision", type="primary"):
+        if st.button("Ask Brain for Decision", type="primary"):
             with st.spinner("Analyzing market data, risk models, and gas costs..."):
                 # Payload must use IDs as keys for allocations
                 allocations_payload = {
@@ -667,413 +780,83 @@ with tab1:
                 st.warning("Historical data not available for one or both assets.")
 
 
-    st.divider()
-    st.markdown("### Portfolio Details")
-    st.markdown("### Portfolio Allocations")
+    # st.divider()
+    # st.markdown("### Portfolio Details")
+    # st.markdown("### Portfolio Allocations")
     
-    # Current single-pool allocation
-    if 'last_decision' in st.session_state:
-        decision = st.session_state['last_decision']
-        if decision['action'] == "REBALANCE":
-            st.success("✅ **Proposed Rebalancing Active**")
-            data = {
-                "Asset": [current_asset_name, target_asset_name],
-                "Allocation ($)": [capital_input, capital_input],
-                "State": ["Current", "Proposed"]
-            }
-            st.bar_chart(pd.DataFrame(data).set_index("State"), stack=False)
-        else:
-            st.info("⏸️ **No Rebalancing Proposed (HOLD)**")
-            st.metric("Current Position", f"${capital_input:,.2f}", f"100% {current_asset_name}")
-    else:
-        st.info("Run 'Ask Brain' in the Live Decision tab to see proposed changes.")
+    # # Current single-pool allocation
+    # if 'last_decision' in st.session_state:
+    #     decision = st.session_state['last_decision']
+    #     if decision['action'] == "REBALANCE":
+    #         st.success("✅ **Proposed Rebalancing Active**")
+    #         data = {
+    #             "Asset": [current_asset_name, target_asset_name],
+    #             "Allocation ($)": [capital_input, capital_input],
+    #             "State": ["Current", "Proposed"]
+    #         }
+    #         st.bar_chart(pd.DataFrame(data).set_index("State"), stack=False)
+    #     else:
+    #         st.info("⏸️ **No Rebalancing Proposed (HOLD)**")
+    #         st.metric("Current Position", f"${capital_input:,.2f}", f"100% {current_asset_name}")
+    # else:
+    #     st.info("Run 'Ask Brain' in the Live Decision tab to see proposed changes.")
     
-    # --- AI Trade Sizer ---
-    st.markdown("---")
-    st.markdown("### AI Trade Sizing (Multi-Pool)")
-    st.caption("Optimal capital allocation across top pools based on risk-adjusted scoring.")
-    
-    sz1, sz2 = st.columns(2)
-    with sz1:
-        sz_max_alloc = st.slider("Max Allocation per Pool (%)", 20, 80, 50, 5, key="sz_max")
-    with sz2:
-        sz_max_pools = st.slider("Max Pools", 1, 5, 3, 1, key="sz_pools")
-    
-    if st.button("Calculate Optimal Sizing", key="run_sizer"):
-        with st.spinner("Scoring pools and calculating allocations..."):
-            try:
-                sizer = TradeSizer(
-                    max_single_allocation=sz_max_alloc / 100,
-                    max_pools=sz_max_pools
-                )
-                
-                # Use the cached pool list
-                pool_dicts = []
-                for p in valid_pools:
-                    pool_dicts.append({
-                        'pool': p['id'],
-                        'symbol': p['name'].split(' (')[0],
-                        'chain': p['name'].split('- ')[-1] if '- ' in p['name'] else '',
-                        'project': p['name'].split('(')[1].split(')')[0] if '(' in p['name'] else '',
-                        'apy': p['apy'],
-                        'tvlUsd': p['tvl'],
-                        'stablecoin': True,
-                        'apyPct1D': 0
-                    })
-                
-                result = sizer.recommend(pool_dicts, total_capital=capital_input)
-                
-                if result['allocations']:
-                    st.success(result['summary'])
-                    
-                    # Metrics row
-                    sc1, sc2 = st.columns(2)
-                    sc1.metric("Weighted APY", f"{result['weighted_apy']:.2f}%")
-                    sc2.metric("Diversification", f"{result['diversification_score']}/100")
-                    
-                    # Allocation table
-                    alloc_data = []
-                    for a in result['allocations']:
-                        alloc_data.append({
-                            "Pool": a.symbol,
-                            "Protocol": a.protocol,
-                            "APY": f"{a.apy:.2f}%",
-                            "Score": f"{a.score}/100",
-                            "Allocation": f"{a.allocation_pct:.1f}%",
-                            "Amount": f"${a.allocation_usd:,.0f}"
-                        })
-                    st.dataframe(pd.DataFrame(alloc_data), use_container_width=True, hide_index=True)
-                    
-                    # Bar chart
-                    chart_df = pd.DataFrame({
-                        "Pool": [a.symbol for a in result['allocations']],
-                        "Allocation ($)": [a.allocation_usd for a in result['allocations']]
-                    }).set_index("Pool")
-                    st.bar_chart(chart_df)
-                else:
-                    st.warning("No suitable pools found for allocation.")
-            except Exception as e:
-                st.error(f"Sizing failed: {e}")
 
 with tab3:
-    with st.expander("ℹ️ How it works: Analysis & Backtest"):
-        st.markdown("""
-        **What it is:** A historical validation engine for the rebalancing strategy.
-        **How it works:**
-        1. **Historical Replay:** We take 30-365 days of actual DeFiLlama yield data and run our rebalancing logic against every daily timestamp.
-        2. **Friction Simulation:** Every historical trade includes simulated Gas costs and slippage based on that day's market conditions.
-        3. **Performance Metrics:** Calculates the 'Sharpe Ratio' (risk-adjusted return) and 'Max Drawdown' to prove that the AI would have outperformed a simple 'Buy & Hold' strategy.
-        4. **Accuracy Tracking:** The **AI Prediction Accuracy** section tracks every *real* decision made by the service and cross-references it with 24-hour outcomes.
-        """)
-    st.markdown("### Strategy Backtest")
-    st.caption("Simulate how the AI rebalancing strategy would have performed on historical data.")
+    st.markdown("### Platform Operations Center")
+    st.caption("Real-time telemetry from the rebalancer's internal engines.")
     
-    # --- Backtest Controls ---
-    bc1, bc2, bc3 = st.columns(3)
-    with bc1:
-        bt_capital = st.number_input("Starting Capital ($)", min_value=1000, value=100000, step=10000, key="bt_capital")
-    with bc2:
-        bt_min_improvement = st.slider("Min APY Gain to Rebalance (%)", min_value=0.5, max_value=10.0, value=2.0, step=0.5, key="bt_min")
-    with bc3:
-        bt_apy_cap = st.slider("Max APY Cap (filter noise)", min_value=50, max_value=500, value=200, step=50, key="bt_cap")
+    col_logs_1, col_logs_2 = st.columns(2)
     
-    if st.button("Run Backtest", type="primary", key="run_bt"):
-        # Check if we have data
-        db = TimeseriesDB()
-        stats = db.get_stats()
-        
-        if stats['total_records'] == 0:
-            st.error("No historical data found. Run the collector first:\n`python -m src.scheduler.collector --backfill`")
-        else:
-            with st.spinner(f"Simulating strategy across {stats['unique_dates']} days of data..."):
-                try:
-                    engine = BacktestEngine(min_apy_improvement=bt_min_improvement)
-                    result = engine.run(
-                        initial_capital=bt_capital,
-                        max_apy_cap=bt_apy_cap
-                    )
-                    
-                    # --- Key Metrics ---
-                    st.markdown("### Performance Summary")
-                    m1, m2, m3, m4 = st.columns(4)
-                    
-                    total_ret_color = "normal" if result.total_return_pct > 0 else "inverse"
-                    m1.metric("Total Return", f"{result.total_return_pct:.2f}%", f"${result.final_capital - result.initial_capital:,.2f}")
-                    m2.metric("Annualized Return", f"{result.annualized_return_pct:.2f}%")
-                    m3.metric("Sharpe Ratio", f"{result.sharpe_ratio:.2f}", help=">1 Good, >2 Great, >3 Excellent")
-                    m4.metric("Max Drawdown", f"{result.max_drawdown_pct:.2f}%", delta_color="inverse")
-                    
-                    m5, m6, m7, m8 = st.columns(4)
-                    m5.metric("Final Capital", f"${result.final_capital:,.2f}")
-                    m6.metric("Total Trades", f"{result.total_trades}")
-                    m7.metric("Win Rate", f"{result.win_rate:.0f}%")
-                    m8.metric("Total Costs", f"${result.total_costs:,.2f}")
-                    
-                    # --- Equity Curve ---
-                    st.markdown("### Equity Curve")
-                    if result.daily_values:
-                        eq_df = pd.DataFrame(result.daily_values)
-                        eq_df['date'] = pd.to_datetime(eq_df['date'])
-                        eq_df = eq_df.set_index('date')
-                        
-                        # Portfolio value over time
-                        st.line_chart(eq_df['value'], use_container_width=True)
-                        
-                        # APY over time
-                        st.markdown("### APY Earned Over Time")
-                        st.area_chart(eq_df['apy'], use_container_width=True)
-                    
-                    # --- Trade Log ---
-                    st.markdown("### Trade History")
-                    if result.trades:
-                        trade_data = []
-                        for t in result.trades:
-                            if t.action in ["REBALANCE", "ENTER"]:
-                                trade_data.append({
-                                    "Date": t.date,
-                                    "Action": t.action,
-                                    "From": t.from_pool,
-                                    "From APY": f"{t.from_apy:.2f}%",
-                                    "To": t.to_pool,
-                                    "To APY": f"{t.to_apy:.2f}%",
-                                    "Cost": f"${t.cost:.2f}",
-                                    "Reason": t.reason
-                                })
-                        
-                        if trade_data:
-                            st.dataframe(pd.DataFrame(trade_data), use_container_width=True, hide_index=True)
-                        else:
-                            st.info("No trades were executed. The strategy held the initial position.")
-                    
-                    # --- Period Info ---
-                    st.caption(f"Backtest period: {result.start_date} to {result.end_date} | Avg APY earned: {result.avg_apy_earned:.2f}%")
-                    
-                except Exception as e:
-                    st.error(f"Backtest failed: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
-    else:
-        # Show DB stats
-        try:
-            db = TimeseriesDB()
-            stats = db.get_stats()
-            if stats['total_records'] > 0:
-                st.success(f"Database: **{stats['total_records']:,}** records | **{stats['unique_pools']}** pools | **{stats['unique_dates']}** days ({stats['oldest_record']} to {stats['newest_record']})")
+    with col_logs_1:
+        # 1. Anvil & Fork Manager
+        with st.expander("⛓️ 1. Anvil & Fork Manager", expanded=True):
+            st.markdown("#### Local Fork Health")
+            st.write("Monitoring `anvil_reset` cycles and contract redeployments.")
+            
+            log_files = ["data/anvil.log", "data/anvil_output.log"]
+            selected_log = st.selectbox("Source:", log_files, key="log_sel_anvil")
+            
+            if os.path.exists(selected_log):
+                with open(selected_log, "r") as f:
+                    lines = f.readlines()
+                    st.code("".join(lines[-50:]), language="text")
             else:
-                st.warning("No historical data. Run: `python -m src.scheduler.collector --backfill`")
-        except:
-            st.warning("Database not initialized yet.")
-    
-    # --- Prediction Accuracy ---
-    st.markdown("---")
-    st.markdown("### AI Prediction Accuracy")
-    st.caption("Tracks every Brain decision and validates against actual outcomes after 24 hours.")
-    
-    try:
-        tracker = PredictionTracker()
-        accuracy = tracker.get_accuracy_stats()
+                st.warning(f"Waiting for {selected_log}...")
+
+    with col_logs_2:
+        # 2. ML Audit (LSTM/XGBoost)
+        with st.expander("🧠 2. LSTM & XGBoost Intelligence", expanded=True):
+            st.markdown("#### ML Conviction Stream")
+            st.write("Filtering `rebalancer.log` for APY projections and risk scores.")
+            
+            rebalancer_log = "data/rebalancer.log"
+            if os.path.exists(rebalancer_log):
+                with open(rebalancer_log, "r") as f:
+                    lines = f.readlines()
+                    ml_lines = [l for l in lines if any(k in l.upper() for k in ["ML", "AUDIT", "BRAIN", "PREDICT", "CONVICTION", "LSTM", "XGB", "APY"])]
+                    if ml_lines:
+                        st.code("".join(ml_lines[-50:]), language="text")
+                    else:
+                        st.info("No ML signals recorded in current session.")
+            else:
+                 st.warning("Rebalancer log offline")
+
+    # 3. Blocks & Decisions (Full Width)
+    with st.expander("📡 3. Rebalancing Decisions & Block Heartbeat", expanded=True):
+        st.markdown("#### Atomic Lifecycle Stream")
+        st.write("Monitoring block-by-block evaluations and execution verdicts.")
         
-        if accuracy['total_predictions'] > 0:
-            pa1, pa2, pa3, pa4 = st.columns(4)
-            pa1.metric("Total Predictions", accuracy['total_predictions'])
-            pa2.metric("Validated", accuracy['validated'])
-            pa3.metric("Accuracy", f"{accuracy['accuracy_pct']}%",
-                       help="% of validated predictions that were correct")
-            pa4.metric("Pending Validation", accuracy['pending'])
-            
-            if accuracy['validated'] > 0:
-                pb1, pb2, pb3 = st.columns(3)
-                pb1.metric("HOLD Accuracy", f"{accuracy['hold_accuracy_pct']}%")
-                pb2.metric("REBALANCE Accuracy", f"{accuracy['rebalance_accuracy_pct']}%")
-                pb3.metric("Profit (if followed)", f"${accuracy['total_profit_if_followed']:,.2f}")
-            
-            # Prediction history table
-            with st.expander("View All Predictions"):
-                preds = tracker.get_all_predictions(limit=20)
-                if preds:
-                    pred_table = []
-                    for p in preds:
-                        pred_table.append({
-                            "Date": p['timestamp'][:10],
-                            "Type": p['prediction_type'],
-                            "Confidence": f"{p['confidence']*100:.0f}%",
-                            "Current APY": f"{p['current_pool_apy']:.2f}%",
-                            "Target APY": f"{p['target_pool_apy']:.2f}%",
-                            "Validated": "✅" if p['validated'] else "⏳",
-                            "Correct": "✅" if p.get('was_correct') else ("❌" if p['validated'] else "—"),
-                            "Reason": p['reason'][:50]
-                        })
-                    st.dataframe(pd.DataFrame(pred_table), use_container_width=True, hide_index=True)
+        if os.path.exists(rebalancer_log):
+            with open(rebalancer_log, "r") as f:
+                lines = f.readlines()
+                dec_lines = [l for l in lines if any(k in l.upper() for k in ["BLOCK", "DECISION", "CYCLE", "VERDICT", "GAS", "REBALANCE", "SYNC"])]
+                if dec_lines:
+                    st.code("".join(dec_lines[-100:]), language="text")
+                else:
+                    st.info("No decision heartbeats found.")
         else:
-            st.info("No predictions recorded yet. Click 'Ask Brain' in the Live Decision tab to generate predictions.")
-    except Exception:
-        st.info("Prediction tracker initializing...")
+            st.warning("Rebalancer log offline")
 
-# --- Tab 5: On-Chain Fork ---
-with tab4:
-    with st.expander("ℹ️ How it works: Simulation Lab"):
-        st.markdown("""
-        **What it is:** An on-chain 'Safe Zone' for testing aggressive trades before they hit mainnet.
-        **How it works:**
-        1. **Mainnet Forking:** Uses Anvil to create a local mirror of the Ethereum blockchain.
-        2. **Time Warping:** Allows you to 'Fast Forward' time by days or weeks to see how much interest the StrategyHub contract actually accrues.
-        3. **Black Swan Mocking:** You can manually trigger 'Emergency Withdrawals' or simulate market crashes to see how the AI handles risk triggers.
-        4. **Asset Snapshots:** Capture the state of the system, run a risky test, and then instantly 'Revert' if it fails—zero real capital lost.
-        """)
-    st.markdown("###  Local Mainnet Fork Status")
-    
-    rpc_url = os.getenv("RPC_URL", "http://localhost:8545")
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
-    node_online = False
-    try:
-        node_online = w3.is_connected()
-    except:
-        pass
-
-    if not node_online:
-        st.warning("Local Fork (Anvil) is not running.")
-        if st.button("🚀 Start Local Fork & Deploy Strategy"):
-            with st.spinner("Starting Anvil and deploying contracts..."):
-                import subprocess
-                subprocess.run([sys.executable, "scripts/start_local_fork.py"], check=True, stdin=subprocess.DEVNULL)
-                st.success("Fork started and StrategyHub deployed!")
-                st.rerun()
-    else:
-        st.success("Mainnet Fork Online (localhost:8545)")
-        
-        # Load Deployed Address
-        addr_file = "contracts/deployed_address.txt"
-        if os.path.exists(addr_file):
-            with open(addr_file, "r") as f:
-                strategy_addr = f.read().strip()
-            
-            st.code(f"StrategyHub: {strategy_addr}")
-            
-            # Show live balances if we can
-            try:
-                # ABI for getBalances()
-                abi = [
-                    {"inputs": [], "name": "getBalances", "outputs": [
-                        {"internalType": "uint256", "name": "aaveBalance", "type": "uint256"},
-                        {"internalType": "uint256", "name": "compoundBalance", "type": "uint256"},
-                        {"internalType": "uint256", "name": "idleBalance", "type": "uint256"},
-                        {"internalType": "uint256", "name": "total", "type": "uint256"}
-                    ], "stateMutability": "view", "type": "function"},
-                    {"inputs": [
-                        {"internalType": "uint256", "name": "newAaveBps", "type": "uint256"},
-                        {"internalType": "uint256", "name": "newCompoundBps", "type": "uint256"}
-                    ], "name": "rebalance", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
-                    {"inputs": [], "name": "aaveAllocationBps", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
-                    {"inputs": [], "name": "compoundAllocationBps", "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"}
-                ]
-                
-                contract = w3.eth.contract(address=strategy_addr, abi=abi)
-                bals = contract.functions.getBalances().call()
-                aave_bps = contract.functions.aaveAllocationBps().call()
-                comp_bps = contract.functions.compoundAllocationBps().call()
-                
-                f1, f2, f3, f4 = st.columns(4)
-                f1.metric("Aave Balance", f"${bals[0]/1e6:,.2f}", f"{aave_bps/100}% target")
-                f2.metric("Compound Balance", f"${bals[1]/1e6:,.2f}", f"{comp_bps/100}% target")
-                f3.metric("Idle USDC", f"${bals[2]/1e6:,.2f}")
-                f4.metric("Total Value", f"${bals[3]/1e6:,.2f}")
-                
-                # Rebalance Control
-                st.markdown("### ⚡ Manual Rebalance Control")
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    aave_target = st.slider("Target Aave %", 0, 100, aave_bps // 100)
-                with col_b:
-                    comp_target = 100 - aave_target
-                    st.write(f"Remaining Compound: {comp_target}%")
-                
-                if st.button("Execute On-Chain Rebalance"):
-                    with st.spinner("Broadcasting rebalance..."):
-                        # Use default anvil account
-                        acct = w3.eth.account.from_key("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
-                        tx = contract.functions.rebalance(aave_target * 100, comp_target * 100).build_transaction({
-                            'from': acct.address,
-                            'nonce': w3.eth.get_transaction_count(acct.address),
-                            'gas': 1000000,
-                            'gasPrice': w3.to_wei('20', 'gwei')
-                        })
-                        signed_tx = w3.eth.account.sign_transaction(tx, acct.key)
-                        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-                        st.success(f"Rebalance successful! TX: {tx_hash.hex()}")
-                        time.sleep(2)
-                        st.rerun()
-                        
-            except Exception as e:
-                st.error(f"Failed to read contract: {e}")
-        else:
-            st.info("Fork is running but StrategyHub is not deployed. Restart the fork to redeploy.")
-
-# --- Tab 6: Simulation Sandbox ---
-
-    st.markdown("### 🧪 On-Chain Simulation Sandbox (Anvil)")
-    
-    if node_online:
-        sim = SimController()
-        
-        # --- Time Warping ---
-        st.markdown("#### ⏳ Time Warping")
-        st.info("Advance time on the fork to observe interest accrual.")
-        
-        c1, c2, c3 = st.columns(3)
-        if c1.button("Jump +1 Hour"):
-            new_ts = sim.jump_forward(3600)
-            st.success(f"Jumped +1 hour. Current TS: {new_ts}")
-            st.rerun()
-        if c2.button("Jump +1 Day"):
-            new_ts = sim.jump_forward(86400)
-            st.success(f"Jumped +1 day. Current TS: {new_ts}")
-            st.rerun()
-        if c3.button("Jump +30 Days"):
-            new_ts = sim.jump_forward(30 * 86400)
-            st.success(f"Jumped +30 days. Current TS: {new_ts}")
-            st.rerun()
-
-        # --- Base Snapshots ---
-        st.markdown("#### 📸 State Snapshots")
-        st.info("Save current state to jump back after testing strategies.")
-        
-        col_snap1, col_snap2 = st.columns(2)
-        if col_snap1.button("📸 Create Snapshot"):
-            snap_id = sim.create_snapshot()
-            st.session_state['last_snapshot'] = snap_id
-            st.success(f"Snapshot #{snap_id} created.")
-        
-        last_snap = st.session_state.get('last_snapshot')
-        if last_snap:
-            if col_snap2.button(f"🔙 Revert to #{last_snap}"):
-                sim.revert_to_snapshot(last_snap)
-                st.success(f"Reverted to #{last_snap}!")
-                st.rerun()
-
-        # --- Security Testing ---
-        st.markdown("#### 🚨 Security & Risk Simulation")
-        st.info("Test the 'Panic Button' and emergency logic.")
-        
-        if st.button("🔥 Trigger Emergency Withdrawal", help="Pulls all funds out and pauses strategy"):
-            # Load Hub
-            addr_file = "contracts/deployed_address.txt"
-            if os.path.exists(addr_file):
-                with open(addr_file, "r") as f:
-                    strategy_addr = f.read().strip()
-                
-                with open("contracts/out/StrategyHub.sol/StrategyHub.json", "r") as f:
-                    hub_abi = json.load(f)["abi"]
-                
-                contract = w3.eth.contract(address=strategy_addr, abi=hub_abi)
-                acct = w3.eth.account.from_key("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
-                
-                tx = contract.functions.emergencyWithdrawAll().transact({'from': acct.address})
-                st.error(f"EMERGENCY TRIGGERED. TX: {tx.hex()}")
-                time.sleep(2)
-                st.rerun()
-                
-    else:
-        st.warning("Simulation sandbox requires Local Fork to be online.")
-
-
-
+    st.divider()
+    st.caption("Logs automatically tail the last 50-100 entries. For full history, inspect the `data/` directory.")

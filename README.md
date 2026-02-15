@@ -283,3 +283,103 @@ To see the brain's decision process or errors:
 docker compose logs -f brain
 docker compose logs -f rebalancer
 ```
+
+
+## LOCAL DEVELOPMENT
+To run the system locally, follow these steps:
+
+Terminal 1: Infrastructure (Database)
+Start the TimescaleDB database container.
+
+```bash
+docker compose up -d db
+```
+Terminal 2: Blockchain Environment (Anvil)
+Start the local Ethereum fork. Ensure your 
+.env
+ has a valid ALCHEMY_API_KEY.
+
+```bash
+# Load environment variables if needed, or just run:
+source .env
+anvil --fork-url https://eth-mainnet.g.alchemy.com/v2/$ALCHEMY_API_KEY --host 0.0.0.0 --port 8545
+```
+Terminal 3: Setup & Deployment (Run Once)
+Use this terminal to set up the environment, deploy contracts to your local Anvil node (running in Terminal 2), and seed the database.
+
+```bash
+# 1. Create and activate virtual environment
+python3.12 -m venv venv
+source venv/bin/activate
+# 2. Install dependencies
+pip install -r requirements.txt
+# 3. Initialize submodules (required for contracts)
+git submodule update --init --recursive
+# 4. Set Python Path
+export PYTHONPATH=$PWD
+# 5. Deploy Contracts
+# This script usually starts anvil, but since we ran it in Terminal 2, 
+# it will detect it and proceed to deploy contracts immediately.
+python3 scripts/start_local_fork.py
+# 6. Seed Database with initial data
+python3 -m src.scheduler.collector --once
+
+```
+Terminal 4: AI Rebalancer Agent
+Runs the core logic that monitors opportunities and executes trades.
+
+```bash
+source venv/bin/activate
+export PYTHONPATH=$PWD
+
+./venv/bin/python -m src.core.rebalancer_service
+
+python3 src/scheduler/rebalancer_loop.py
+
+```
+Terminal 5: Data Collector
+Runs the periodic data fetcher (simulates the cron job).
+```bash
+source venv/bin/activate
+export PYTHONPATH=$PWD
+# Interval 0.083 hours = ~5 minutes
+python3 src/scheduler/collector.py --interval 0.083
+
+
+Terminal 6: API Server (The Brain)
+Runs the FastAPI backend that the dashboard communicates with.
+
+```bash
+source venv/bin/activate
+export PYTHONPATH=$PWD
+uvicorn src.api.server:app --host 0.0.0.0 --port 8000 --reload
+```
+Terminal 7: Dashboard (Frontend)
+Runs the Streamlit user interface.
+
+```bash
+source venv/bin/activate
+export PYTHONPATH=$PWD
+streamlit run dashboard/app.py --server.port 8501
+
+
+# in server 
+# contract_manager.py
+#    rpc_urls = {
+#             "sepolia": os.getenv("SEPOLIA_RPC_URL"),
+#             "base_sepolia": os.getenv("BASE_SEPOLIA_RPC_URL"),
+#             "mainnet": os.getenv("ETHEREUM_RPC_URL"),
+#             "ethereum": os.getenv("RPC_URL"), # For fork mode, RPC_URL is often used
+#             "base": os.getenv("BASE_RPC_URL"),
+#             "local": "http://anvil:8545" # Internal docker DNS
+#         }
+
+# and in local development
+# rpc_urls = {
+#             "sepolia": os.getenv("SEPOLIA_RPC_URL"),
+#             "base_sepolia": os.getenv("BASE_SEPOLIA_RPC_URL"),
+#             "mainnet": os.getenv("ETHEREUM_RPC_URL"),
+#             "ethereum": os.getenv("RPC_URL"), # For fork mode, RPC_URL is often used
+#             "base": os.getenv("BASE_RPC_URL"),
+#             "local": os.getenv("RPC_URL", "http://localhost:8545") # Localhost or Docker env
+#         }        

@@ -113,7 +113,8 @@ class DefiLlamaClient:
             p for p in all_pools
             if p.get('chain', '').lower() in chains_lower
             and p.get('tvlUsd', 0) >= min_tvl
-            and p.get('stablecoin', False)  # Focus on stablecoin pools for safety
+            # Allow Stablecoins OR Single-Sided Staking (No Impermanent Loss)
+            and (p.get('stablecoin', False) or p.get('ilRisk', '').lower() == 'no')
             and p.get('apy', 0) < 500       # Filter out obvious errors/scams > 500%
         ]
         

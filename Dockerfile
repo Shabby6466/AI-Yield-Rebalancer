@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
     postgresql-client \
+    lsof \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Foundry (Anvil/Forge) for the Simulation Lab

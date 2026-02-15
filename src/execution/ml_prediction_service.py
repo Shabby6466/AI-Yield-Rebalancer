@@ -12,6 +12,7 @@ import numpy as np
 import xgboost as xgb
 import pickle
 from web3 import Web3
+from src.execution.protocol_tvl_resolver import ProtocolTVLResolver
 from eth_account import Account
 from decimal import Decimal
 from datetime import datetime
@@ -228,6 +229,14 @@ class LSTMPredictor:
             Predicted APY as percentage
         """
         try:
+            # Dynamically determine expected input size from the model
+            expected_features = self.model.input_size if hasattr(self.model, 'input_size') else 32
+            
+            # Slice features if the model expects fewer (e.g., 4 raw vs 32 expanded)
+            if features.shape[-1] > expected_features:
+                logger.debug(f"Slicing features from {features.shape[-1]} to {expected_features}")
+                features = features[:, :expected_features]
+            
             # Reshape features if necessary to (batch, seq, features)
             if len(features.shape) == 2:
                 features = np.expand_dims(features, axis=0)
@@ -291,8 +300,8 @@ class RiskClassifier:
         else:
             self.label_encoder = None
             
-    def predict_risk_score(self, features: np.ndarray) -> Tuple[str, float, float]:
-        """Predict risk level, confidence, and numerical score (0-100)"""
+    def predict_risk_score(self, features: np.ndarray) -> Tuple[str, float, float, str]:
+        """Predict risk level, confidence, numerical score (0-100), and market regime"""
         if self.model is None:
             # Simulated risk for POC if model file is missing
             levels = ['low', 'medium', 'high']
@@ -307,7 +316,12 @@ class RiskClassifier:
                 if i != predicted_idx: probs[i] = remaining
                 
             risk_score = float(probs[0] * 15 + probs[1] * 50 + probs[2] * 85)
-            return risk_level, np.random.uniform(85, 99), risk_score
+            
+            # Simulated Market Regime
+            regimes = ['Bullish Retracement', 'Bearish Breakdown', 'Stable Accumulation', 'Volatile Expansion']
+            market_regime = np.random.choice(regimes)
+            
+            return risk_level, np.random.uniform(85, 99), risk_score, market_regime
 
         try:
             # Scale features
@@ -343,12 +357,22 @@ class RiskClassifier:
                 risk_levels = ['low', 'medium', 'high']
                 risk_level = risk_levels[min(predicted_class, len(risk_levels)-1)]
             
-            logger.info(f"Risk prediction: {risk_level} (score: {risk_score:.1f}, confidence: {confidence:.2f}%)")
-            return risk_level, confidence, risk_score
+            # Categorize Market Regime based on probabilities and scores
+            if risk_score < 30:
+                market_regime = 'Stable Accumulation'
+            elif risk_score < 60:
+                market_regime = 'Bullish Retracement'
+            else:
+                market_regime = 'Bearish Breakdown'
+                if confidence > 90:
+                    market_regime = 'Volatile Expansion'
+
+            logger.info(f"Risk prediction: {risk_level} (score: {risk_score:.1f}, regime: {market_regime})")
+            return risk_level, confidence, risk_score, market_regime
             
         except Exception as e:
             logger.error(f"Risk prediction failed: {e}")
-            return 'medium', 50.0, 50.0
+            return 'medium', 50.0, 50.0, 'Stable Accumulation'
 
 
 class MLPredictionService:
@@ -359,6 +383,27 @@ class MLPredictionService:
         self.network = network
         self.contract_manager = ContractManager(network)
         
+        # DUAL-RPC SETUP: 
+        # 1. self.contract_manager.w3 -> Connected to LOCAL Fork (for Execution/Balances/Simulation)
+        # 2. self.mainnet_w3 -> Connected to REAL Mainnet (for Real-Time APY/TVL Data)
+        self.mainnet_w3 = None
+        mainnet_rpc = os.getenv("ETHEREUM_RPC_URL")
+        if mainnet_rpc:
+            try:
+                w3_instance = Web3(Web3.HTTPProvider(
+                    mainnet_rpc,
+                    request_kwargs={'timeout': 10}
+                ))
+                if w3_instance and w3_instance.is_connected():
+                    self.mainnet_w3 = w3_instance
+                    logger.info(f"✓ Connected to Real Mainnet for Data Fetching (Block {self.mainnet_w3.eth.block_number})")
+                else:
+                    logger.warning("Failed to connect to Reference Mainnet RPC")
+                    self.mainnet_w3 = None
+            except Exception as e:
+                logger.warning(f"Could not setup Mainnet Data Connection: {e}")
+                self.mainnet_w3 = None
+
         # Load ML models
         lstm_path = 'models/lstm_predictor_final.ckpt'
         xgb_path = 'models/xgboost_risk_classifier.json'
@@ -368,6 +413,17 @@ class MLPredictionService:
         
         # Initialize database logger
         self.db_logger = DatabaseLogger()
+        
+        # Load dynamic token map if valid
+        self.DYNAMIC_ADDRESSES = {}
+        try:
+            map_path = "src/data/token_map.json"
+            if os.path.exists(map_path):
+                with open(map_path, 'r') as f:
+                    self.DYNAMIC_ADDRESSES = json.load(f)
+                logger.info(f"✓ Loaded {len(self.DYNAMIC_ADDRESSES)} dynamic token addresses")
+        except Exception as e:
+            logger.warning(f"Failed to load dynamic token map: {e}")
         
         logger.info(f"ML Prediction Service initialized for {network}")
 
@@ -437,16 +493,17 @@ class MLPredictionService:
         'EURC': '0x1abaea1f7c830bd89acc67ec4af516284b1bc33c',
         'SUSDE': '0x9d39a5de30e57443bff2a8307a4256c8797a3497',
         'USDS': '0xdc035d45d973e3ec169d2276ddab16f1e407384f',
-        # Yield-bearing "i" tokens (Instadapp/Lite)
-        'IDAI': '0x611cc53503d97dc9080c98f86f78716a803db3f7',
-        'IUSDC': '0x3274576510cd38cb54b647185c01306c94339be9',
-        'IUSDT': '0x3b68ef230a17409f583152cd08064f250b39feed',
+        # Yield-bearing "i" tokens (Instadapp/Lite) - COMMENTED OUT: Not on Mainnet
+        # 'IDAI': '0x611cc53503d97dc9080c98f86f78716a803db3f7',
+        # 'IUSDC': '0x3274576510cd38cb54b647185c01306c94339be9',
+        # 'IUSDT': '0x3b68ef230a17409f583152cd08064f250b39feed',
         # Additional Common Stablecoins
         'FRAX': '0x853d955acef822db058eb8505911ed77f175b99e',
         'MUSD': '0xe2f2a5c287993345a840db3b0845fbc70f5935a5',
         'GHO': '0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f',
         'LUSD': '0x5f98805a4e8be255a32880fdec7f6728c6568ba0',
-        'PYUSD': '0x6c3ea9036406852006290770bedfcaba0e23a0e8'
+        'PYUSD': '0x6c3ea9036406852006290770bedfcaba0e23a0e8',
+        'ZBU': '0x8f9b4525681F3Ea6E43b8E0a57BFfF86c0A1dd2e',
     }
 
     def get_pool_features(self, pool_address: str, asset_address: str) -> Dict:
@@ -478,9 +535,23 @@ class MLPredictionService:
             if pool_address == strategy_manager_addr:
                 return self._fetch_internal_strategy_features(pool_address, asset_address)
             
+            # Select Provider: Use Mainnet for Reads if available, otherwise Local
+            read_w3 = self.mainnet_w3 if self.mainnet_w3 else self.contract_manager.w3
+            
             # External Protocol logic (Aave/Compound/Generic)
-            # Use ERC20 for TVL and protocol-specific for APY
-            token_contract = self.contract_manager.w3.eth.contract(address=asset_address, abi=self.ERC20_ABI)
+            # 3.5 Bytecode Verification: Ensure address is a contract on THIS chain
+            code = read_w3.eth.get_code(pool_address)
+            if not code or code.hex() == '0x':
+                logger.warning(f"⚠️ No bytecode at pool address {pool_address}. This pool may be on another chain.")
+                return {'ghost_tvl': True, 'success': False, 'msg': 'Empty pool address'}
+
+            # Token Verification
+            asset_code = read_w3.eth.get_code(asset_address)
+            if not asset_code or asset_code.hex() == '0x':
+                logger.warning(f"⚠️ No bytecode at asset address {asset_address}. Token not found on this chain.")
+                return {'ghost_tvl': True, 'success': False, 'msg': 'Empty asset address'}
+
+            token_contract = read_w3.eth.contract(address=asset_address, abi=self.ERC20_ABI)
             decimals = token_contract.functions.decimals().call()
             
             # APY Detection & Enhanced TVL for Aave V3
@@ -490,7 +561,7 @@ class MLPredictionService:
             
             if pool_address == aave_v3_pool: # Aave V3 - Special Handling
                 try:
-                    pool_contract = self.contract_manager.w3.eth.contract(address=pool_address, abi=self.AAVE_V3_POOL_ABI)
+                    pool_contract = read_w3.eth.contract(address=pool_address, abi=self.AAVE_V3_POOL_ABI)
                     reserve_data = pool_contract.functions.getReserveData(asset_address).call()
                     
                     # liquidityRate is expressed in ray (1e27), convert to % APY
@@ -498,7 +569,7 @@ class MLPredictionService:
                     
                     # For Aave, TVL = total supply of aToken (not pool's balance)
                     atoken_address = reserve_data[8]  # aTokenAddress from ReserveData struct
-                    atoken_contract = self.contract_manager.w3.eth.contract(address=atoken_address, abi=self.ERC20_ABI)
+                    atoken_contract = read_w3.eth.contract(address=atoken_address, abi=self.ERC20_ABI)
                     total_supply_raw = atoken_contract.functions.totalSupply().call()
                     tvl_scaled = float(total_supply_raw) / (10 ** decimals)
                     
@@ -512,8 +583,8 @@ class MLPredictionService:
                     # Don't use balanceOf fallback - let it try protocol resolver below
             else:
                 # Use Protocol-Specific TVL Resolver for modern vaults
-                from src.execution.protocol_tvl_resolver import ProtocolTVLResolver
-                tvl_resolver = ProtocolTVLResolver(self.contract_manager.w3)
+                # Pass the read provider (Mainnet) to the resolver
+                tvl_resolver = ProtocolTVLResolver(read_w3)
                 tvl_scaled, tvl_method = tvl_resolver.resolve_tvl(pool_address, asset_address, decimals)
                 
                 if tvl_scaled > 0:
@@ -637,16 +708,17 @@ class MLPredictionService:
                     cur.execute("""
                         SELECT py.apy_percent, py.tvl_usd 
                         FROM protocol_yields py
-                        JOIN protocols p ON py.protocol_id = p.id
                         WHERE py.asset = %s
-                        AND (p.address = %s OR %s ILIKE '%' || p.symbol || '%')
+                        AND (%s ILIKE '%%' || p.symbol || '%%')
                         ORDER BY py.recorded_at DESC LIMIT %s
-                    """, (asset_symbol, pool_address, pool_address, sequence_length))
+                    """, (asset_symbol, pool_address, sequence_length))
                     
                     rows = cur.fetchall()
                     for row in reversed(rows):
                         # Use base features [APY, TVL, Vol, Risk]
-                        sequence.append([float(row[0]), float(row[1]), 0.05, 0.5])
+                        safe_apy = float(row[0] or 0.0)
+                        safe_tvl = float(row[1] or 0.0)
+                        sequence.append([safe_apy, safe_tvl, 0.05, 0.5])
             except Exception as e:
                 logger.warning(f"Failed to fetch real history from DB: {e}")
             finally:
@@ -680,9 +752,11 @@ class MLPredictionService:
         for part in parts:
             candidate = part.upper()
             
-            # Step A: Direct Check
+            # Step A: Direct Check (Verified -> Dynamic)
             if candidate in self.VERIFIED_ADDRESSES:
                 return self.VERIFIED_ADDRESSES[candidate]
+            if candidate in self.DYNAMIC_ADDRESSES:
+                return self.DYNAMIC_ADDRESSES[candidate]
                 
             # Step B: Recursive Prefix Stripping
             temp = candidate
@@ -696,6 +770,9 @@ class MLPredictionService:
                         if temp in self.VERIFIED_ADDRESSES:
                             logger.info(f"Fuzzy Resolved: {identifier} -> {temp} ({self.VERIFIED_ADDRESSES[temp]})")
                             return self.VERIFIED_ADDRESSES[temp]
+                        if temp in self.DYNAMIC_ADDRESSES:
+                            logger.info(f"Fuzzy Resolved (Dynamic): {identifier} -> {temp} ({self.DYNAMIC_ADDRESSES[temp]})")
+                            return self.DYNAMIC_ADDRESSES[temp]
                         changed = True
                         break
             
@@ -760,26 +837,28 @@ class MLPredictionService:
                     query = """
                         SELECT py.apy_percent, py.tvl_usd 
                         FROM protocol_yields py
-                        JOIN protocols p ON py.protocol_id = p.id
                         WHERE py.asset = %s
-                        AND (p.address = %s OR %s ILIKE '%%' || p.symbol || '%%')
                         ORDER BY py.recorded_at DESC LIMIT 14
                     """
-                    # The fix: Ensure exactly 3 variables match the 3 %s placeholders
-                    params = (asset_symbol, pool_address, pool_address)
+                    # The fix: Ensure exactly 1 variable matches the 1 %s placeholder
+                    params = (asset_symbol,)
                     cur.execute(query, params)
                     
                     rows = cur.fetchall()
                     for row in reversed(rows):
-                        base_sequence.append([float(row[0]), float(row[1]), 0.05, 0.5])
+                        safe_apy = float(row[0] or 0.0)
+                        safe_tvl = float(row[1] or 0.0)
+                        base_sequence.append([safe_apy, safe_tvl, 0.05, 0.5])
             finally:
                 self.db_logger._put_conn(conn)
         
         while len(base_sequence) < 14:
             base_sequence.insert(0, [random.gauss(10.0, 2.0), 1_000_000.0, 0.05, 0.5])
             
-        # Update last element with current features
-        base_sequence[-1] = [features.get('current_apy', 0), features.get('tvl', 0), 0.05, 0.5]
+        # Update last element with current features (Safety: Ensure no None types)
+        curr_apy = float(features.get('current_apy') or 0.0)
+        curr_tvl = float(features.get('tvl') or 0.0)
+        base_sequence[-1] = [curr_apy, curr_tvl, 0.05, 0.5]
         
         # Expand 4 -> 32
         lstm_input = self.expand_features(np.array(base_sequence).astype(np.float32))
@@ -803,7 +882,7 @@ class MLPredictionService:
         ])
         
         # Predict risk
-        risk_level, confidence, risk_score = self.risk_classifier.predict_risk_score(risk_features)
+        risk_level, confidence, risk_score, market_regime = self.risk_classifier.predict_risk_score(risk_features)
         
         # Safety Trigger: Override if liquidity is toxic
         if liquidity_is_toxic:
@@ -811,12 +890,14 @@ class MLPredictionService:
             risk_level = "high"
             risk_score = 95.0
             confidence = 99.9
+            market_regime = "Volatile Expansion"  # Safety regime
         
         prediction = {
             'predicted_apy': round(predicted_apy, 4),
             'risk_level': risk_level,
             'risk_score': round(risk_score, 2),
             'confidence': round(confidence, 2),
+            'market_regime': market_regime,
             'timestamp': datetime.now().isoformat(),
             'pool_address': pool_address,
             'asset_address': resolved_address,
@@ -829,6 +910,54 @@ class MLPredictionService:
         self.db_logger.log_prediction(prediction)
         
         return prediction
+
+    def analyze_retracement_probability(self, pool_address: str, current_tick: int, trigger_tick: int) -> float:
+        """
+        Uses LSTM to predict if the price (tick) will return to the trigger range.
+        Returns a probability (0.0 to 1.0).
+        """
+        try:
+            # For POC, use the market regime and confidence to estimate probability
+            # Higher confidence in 'Stable Accumulation' or 'Bullish Retracement' -> Higher probability
+            _, confidence, risk_score, regime = self.risk_classifier.predict_risk_score(np.zeros(7))
+            
+            base_prob = 0.5
+            if regime == 'Stable Accumulation': base_prob = 0.8
+            elif regime == 'Bullish Retracement': base_prob = 0.65
+            elif regime == 'Bearish Breakdown': base_prob = 0.2
+            elif regime == 'Volatile Expansion': base_prob = 0.1
+            
+            # Adjust based on distance from trigger (heuristic)
+            distance = abs(current_tick - trigger_tick)
+            decay = min(0.3, distance / 10000) # Decay prob if far away
+            
+            final_prob = max(0.05, min(0.95, base_prob - decay + (random.uniform(-0.05, 0.05))))
+            return round(final_prob, 4)
+        except Exception as e:
+            logger.error(f"Retracement analysis failed: {e}")
+            return 0.5
+
+    def calculate_optimal_range(self, current_tick: int, market_regime: str) -> Tuple[int, int]:
+        """
+        Calculates a new tick range [lower, upper] based on the current market regime.
+        'Stable' -> Narrower range, higher yield.
+        'Volatile' -> Wider range, safer.
+        """
+        # Width constants (simplified)
+        WIDTHS = {
+            'Stable Accumulation': 500,
+            'Bullish Retracement': 1500,
+            'Bearish Breakdown': 2500,
+            'Volatile Expansion': 5000
+        }
+        
+        width = WIDTHS.get(market_regime, 1500)
+        
+        # Trend adjustment: if bullish, center slightly higher
+        offset = 100 if 'Bullish' in market_regime else (-100 if 'Bearish' in market_regime else 0)
+        
+        center = current_tick + offset
+        return int(center - width), int(center + width)
 
     def update_pool_predictions(self, pools: List[Tuple[str, str]]) -> bool:
         """Generate predictions and update StrategyManager contract"""

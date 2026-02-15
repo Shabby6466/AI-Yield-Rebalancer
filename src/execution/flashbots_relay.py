@@ -64,6 +64,7 @@ class FlashbotsRelayer:
         # Wait for the result (non-blocking in a real keeper, but synchronous for now)
         send_result.wait()
         
+
         try:
             receipts = send_result.receipts()
             logger.info(f"Bundle included in block {target_block}! Receipts: {len(receipts)}")
@@ -71,6 +72,15 @@ class FlashbotsRelayer:
         except Exception:
             logger.warning(f"Bundle was not included in block {target_block}.")
             return False
+
+    def relay_with_retry(self, tx_list, retry_count=3):
+        current_block = self.w3.eth.block_number
+        for i in range(1, retry_count + 1):
+            target = current_block + i
+            success = self.send_rebalance_bundle(tx_list, target)
+            if success:
+                return True
+        return False
 
 if __name__ == "__main__":
     # Integration test snippet

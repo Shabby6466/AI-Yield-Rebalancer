@@ -73,6 +73,18 @@ class TimeseriesDB:
                     duration_seconds REAL DEFAULT 0
                 )
             """)
+            
+            # New Wallet Snapshot Table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS wallet_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    total_usd REAL NOT NULL,
+                    eth_balance REAL NOT NULL,
+                    asset_json TEXT NOT NULL
+                )
+            """)
+            
             conn.commit()
         logger.info(f"TimeseriesDB initialized at {self.db_path}")
 
@@ -105,6 +117,58 @@ class TimeseriesDB:
         except Exception as e:
             logger.error(f"Failed to insert snapshot: {e}")
             return False
+
+    def log_wallet_snapshot(self, total_usd: float, eth_balance: float, assets: List[Dict]):
+        """Log the current state of the wallet assets."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO wallet_snapshots (timestamp, total_usd, eth_balance, asset_json)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    datetime.utcnow().isoformat(),
+                    total_usd,
+                    eth_balance,
+                    json.dumps(assets)
+                ))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to log wallet snapshot: {e}")
+
+    def get_latest_wallet_snapshot(self) -> Optional[Dict]:
+        """Get the most recent wallet snapshot."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                row = conn.execute("""
+                    SELECT timestamp, total_usd, eth_balance, asset_json
+                    FROM wallet_snapshots
+                    ORDER BY id DESC LIMIT 1
+                """).fetchone()
+                
+                if row:
+                    data = dict(row)
+                    data['assets'] = json.loads(data['asset_json'])
+                    return data
+                return None
+        except Exception as e:
+            logger.error(f"Failed to fetch wallet snapshot: {e}")
+            return None
+
+    def get_wallet_history(self, limit: int = 100) -> List[Dict]:
+        """Get historical wallet value trend."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute("""
+                    SELECT timestamp, total_usd, eth_balance
+                    FROM wallet_snapshots
+                    ORDER BY id DESC LIMIT ?
+                """, (limit,)).fetchall()
+                return [dict(r) for r in rows][::-1] # proper chronological order
+        except Exception as e:
+            logger.error(f"Failed to fetch wallet history: {e}")
+            return []
 
     def bulk_insert(self, pools: List[Dict]) -> int:
         """

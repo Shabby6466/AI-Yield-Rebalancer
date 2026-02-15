@@ -2,6 +2,7 @@ import json
 import os
 import logging
 from pathlib import Path
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -15,19 +16,27 @@ class StateStore:
         os.makedirs(data_dir, exist_ok=True)
         self.file_path = data_dir / file_name
         
-    def save_state(self, pool_id: str, symbol: str, apy: float):
+    def update_state(self, **kwargs):
+        """Flexible update for any field in the state."""
         try:
-            state = {
-                "current_pool_id": pool_id,
-                "current_pool_symbol": symbol,
-                "current_apy": apy,
-                "last_updated": os.times()[4]
-            }
+            state = self.load_state()
+            state.update(kwargs)
+            state["last_updated"] = datetime.utcnow().isoformat()
             with open(self.file_path, 'w') as f:
                 json.dump(state, f)
-            logger.info(f"State saved to {self.file_path}: {symbol} at {apy:.2f}%")
+            logger.info(f"State updated: {kwargs}")
         except Exception as e:
-            logger.error(f"Failed to save state: {e}")
+            logger.error(f"Failed to update state: {e}")
+
+    def save_state(self, pool_id: str, symbol: str, apy: float, initial_capital: float = 0.0, cumulative_costs: float = 0.0):
+        """Legacy wrapper for update_state."""
+        self.update_state(
+            current_pool_id=pool_id,
+            current_pool_symbol=symbol,
+            current_apy=apy,
+            initial_capital=initial_capital,
+            cumulative_costs=cumulative_costs
+        )
 
     def load_state(self) -> dict:
         try:
@@ -40,5 +49,7 @@ class StateStore:
         return {
             "current_pool_id": None,
             "current_pool_symbol": "CASH",
-            "current_apy": 0.0
+            "current_apy": 0.0,
+            "initial_capital": 0.0,
+            "cumulative_costs": 0.0
         }
