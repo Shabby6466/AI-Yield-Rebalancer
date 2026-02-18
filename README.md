@@ -419,4 +419,12 @@ docker compose run --rm trainer
 docker compose cp scripts/fund_vault.py rebalancer:/app/scripts/fund_vault.py
 
 docker compose exec rebalancer python3 scripts/fund_vault.py
+
+docker compose cp scripts/init_db.py rebalancer:/app/scripts/init_db.py
+
+docker compose exec rebalancer python3 scripts/init_db.py
+
+docker compose run --rm trainer
+
+docker compose restart brain
 ```

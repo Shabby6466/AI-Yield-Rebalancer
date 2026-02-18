@@ -83,23 +83,29 @@ def check_and_fund(keeper_addr, min_needed=50000):
     print(f"✅ Stole {amount_to_steal / 10**6:,.2f} USDC from the whale.")
 
 
-def main():
-    if not KEEPER_PK or not VAULT_ADDR:
-        print("❌ Missing environment variables (KEEPER_PRIVATE_KEY or VAULT_CONTRACT_ADDRESS)")
-        # Try to load from deployed_address.txt if env var missing
-        try:
-            with open("contracts/deployed_address.txt", "r") as f:
-                # Vault address isn't directly in here in simple format, it's just one addr?
-                # Ah, deployed_address.txt only has Hub usually.
-                # Let's rely on .env which we just fixed.
-                pass 
-        except: pass
+    
+    if not KEEPER_PK:
+        print("❌ Missing KEEPER_PRIVATE_KEY")
+        sys.exit(1)
+
+    if not VAULT_ADDR:
+        print("❌ Missing VAULT_CONTRACT_ADDRESS")
+        # Try to find it in .env manually if load_dotenv failed?
+        if os.path.exists(".env"):
+             print("🔎 Checking .env file content...")
+             with open(".env") as f:
+                 for line in f:
+                     if "VAULT_CONTRACT_ADDRESS" in line:
+                         print(f"   found: {line.strip()}")
         sys.exit(1)
 
     cast = get_cast_path()
     keeper_addr = subprocess.run([cast, "wallet", "address", "--private-key", KEEPER_PK], capture_output=True, text=True).stdout.strip()
     
-    print(f"💰 Funding Vault {VAULT_ADDR} from Keeper {keeper_addr}...")
+    print(f"💰 Funding Vault: {VAULT_ADDR}")
+    print(f"   From Keeper:   {keeper_addr}")
+    print(f"   RPC URL:       {RPC_URL}")
+
     
     # 0. Check & Fund
     check_and_fund(keeper_addr)
