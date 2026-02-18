@@ -121,17 +121,22 @@ def setup_roles(hub_addr, vault_addr, keeper_addr):
 def update_env(hub_addr, vault_addr):
     """Update .env file with new addresses"""
     print(f"📝 Updating .env...")
-    with open(".env", "r") as f:
-        lines = f.readlines()
-    
-    with open(".env", "w") as f:
-        for line in lines:
-            if line.startswith("VAULT_CONTRACT_ADDRESS="):
-                f.write(f"VAULT_CONTRACT_ADDRESS={vault_addr}\n")
-            elif line.startswith("STRATEGY_HUB_ADDRESS="):
-                f.write(f"STRATEGY_HUB_ADDRESS={hub_addr}\n")
-            else:
-                f.write(line)
+    try:
+        with open(".env", "r") as f:
+            lines = f.readlines()
+        
+        with open(".env", "w") as f:
+            for line in lines:
+                if line.startswith("VAULT_CONTRACT_ADDRESS="):
+                    f.write(f"VAULT_CONTRACT_ADDRESS={vault_addr}\n")
+                elif line.startswith("STRATEGY_HUB_ADDRESS="):
+                    f.write(f"STRATEGY_HUB_ADDRESS={hub_addr}\n")
+                else:
+                    f.write(line)
+    except FileNotFoundError:
+        print("⚠️ .env file not found. Skipping .env update (Expected in Docker).")
+    except Exception as e:
+        print(f"⚠️ Failed to update .env: {e}")
 
 def deploy_contracts(keeper_addr):
     print("🚀 Deploying Smart Contracts via Forge Script...")
@@ -185,11 +190,12 @@ def deploy_contracts(keeper_addr):
     with open("deployments/local.json", "w") as f:
         json.dump(deployment_data, f, indent=2)
     
-    update_env(hub_addr, vault_addr)
-    
     # Also write to simple text file for RebalancerService local pick-up
+    # Do this BEFORE update_env to ensure it happens even if .env fails
     with open("contracts/deployed_address.txt", "w") as f:
         f.write(hub_addr)
+        
+    update_env(hub_addr, vault_addr)
         
     return hub_addr, vault_addr
 
