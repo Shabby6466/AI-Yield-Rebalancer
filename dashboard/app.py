@@ -301,64 +301,43 @@ try:
     # --- ROI Tracking Section ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("📈 Net ROI Performance")
-    
+
     try:
-        from src.execution.roi_calculator import ROICalculator
-        roi_calc = ROICalculator()
-        
-        # Get latest ROI snapshot
-        latest_roi = roi_calc.get_latest_roi_snapshot()
-        
-        if latest_roi:
+        net_roi_pct      = float(on_chain_data.get("net_roi_pct", 0.0))      if on_chain_data else 0.0
+        total_yield      = float(on_chain_data.get("total_yield_earned", 0.0)) if on_chain_data else 0.0
+        initial_capital  = float(on_chain_data.get("initial_capital", 0.0))   if on_chain_data else 0.0
+        last_harvest     = on_chain_data.get("last_harvest_time")              if on_chain_data else None
+
+        if initial_capital > 0 or total_yield > 0:
             col1, col2 = st.sidebar.columns(2)
-            
             with col1:
-                roi_color = "green" if latest_roi['roi_percent'] >= 0 else "red"
                 st.metric(
-                    "ROI %",
-                    f"{latest_roi['roi_percent']:.2f}%",
-                    help="Current Net ROI on active rebalance",
-                    delta=f"{latest_roi['apy_achieved_percent']:.2f}% APY"
+                    "Net ROI",
+                    f"{net_roi_pct:.4f}%",
+                    delta=f"${total_yield:,.2f} earned",
+                    help="Cumulative yield earned vs initial capital"
                 )
-            
             with col2:
                 st.metric(
-                    "P&L",
-                    f"${latest_roi['total_gain_loss_usd']:,.2f}",
-                    help="Total Profit/Loss in USD"
+                    "Yield Earned",
+                    f"${total_yield:,.2f}",
+                    help="Total USDC yield harvested from Aave + Compound"
                 )
-            
-            # Detailed ROI breakdown
+
             with st.sidebar.expander("ROI Breakdown", expanded=False):
-                st.write(f"**Yield Earned**: ${latest_roi['yield_earned_usd']:,.2f}")
-                st.write(f"**Gas Cost**: ${latest_roi['gas_cost_usd']:,.2f}")
-                st.write(f"**Entry Value**: ${latest_roi['entry_portfolio_value_usd']:,.2f}")
-                st.write(f"**Snapshot Time**: {latest_roi['snapshot_date']}")
-                
-                if latest_roi['allocation']:
-                    st.write("**Current Allocation**:")
-                    for protocol, pct in latest_roi['allocation'].items():
-                        st.write(f"  • {protocol}: {pct}%")
+                st.write(f"**Initial Capital**: ${initial_capital:,.2f}")
+                st.write(f"**Total Yield Earned**: ${total_yield:,.4f}")
+                st.write(f"**Net ROI**: {net_roi_pct:.4f}%")
+                if last_harvest:
+                    st.write(f"**Last Harvest**: {last_harvest}")
+                else:
+                    st.caption("Run `/admin/harvest` to simulate yield accrual")
         else:
-            st.sidebar.info("No active rebalance ROI data yet")
-        
-        # Get cumulative ROI
-        cum_roi = roi_calc.get_cumulative_roi()
-        if cum_roi and cum_roi['total_rebalances'] > 0:
-            st.sidebar.markdown("---")
-            st.sidebar.write("**30-Day Summary**")
-            st.sidebar.metric("Total Rebalances", cum_roi['total_rebalances'])
-            st.sidebar.metric(
-                "Cumulative ROI",
-                f"{cum_roi['cumulative_roi_percent']:.2f}%",
-                delta=f"Gain: ${cum_roi['cumulative_gain_usd']:,.2f}"
-            )
-            st.sidebar.metric("Total Gas Cost", f"${cum_roi['total_gas_cost_usd']:,.2f}")
-        
-        roi_calc.close()
-        
+            st.sidebar.info("No yield data yet — run harvest to accrue interest")
+
     except Exception as e:
         st.sidebar.warning(f"ROI Data Unavailable: {str(e)[:50]}")
+
 
     # --- Signals & Config ---
     st.sidebar.markdown("---")
