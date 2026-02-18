@@ -84,14 +84,15 @@ class RebalancerService:
         
         # Initialize Layers
         
-        # Resolve StrategyHub Address (Env or Local File)
-        if network == "local" and os.path.exists("contracts/deployed_address.txt"):
+        # Resolve StrategyHub Address — Priority: Env Var > Local File > Hardcoded Fallback
+        self.hub_address = os.getenv("STRATEGY_HUB_ADDRESS")
+        
+        if not self.hub_address and network == "local" and os.path.exists("contracts/deployed_address.txt"):
             with open("contracts/deployed_address.txt", "r") as f:
                 self.hub_address = f.read().strip()
                 logger.info(f"Loaded StrategyHub from file (Local Override): {self.hub_address}")
-        else:
-             self.hub_address = os.getenv("STRATEGY_HUB_ADDRESS")
-
+        elif self.hub_address:
+            logger.info(f"Loaded StrategyHub from ENV: {self.hub_address}")
         
         if not self.hub_address:
              # Final fallback to a well-known address if absolutely nothing found
