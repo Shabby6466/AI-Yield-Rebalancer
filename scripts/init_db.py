@@ -35,19 +35,29 @@ def init_db():
             # However, if it failed, we might need to reset connection state if not in autocommit, but we are.
 
         # 2. Create the table
-        logger.info("Creating yield_snapshots table...")
+        logger.info("Recreating yield_snapshots table with correct schema...")
+        cur.execute("DROP TABLE IF EXISTS yield_snapshots CASCADE;")
+        
         create_table_sql = """
-        CREATE TABLE IF NOT EXISTS yield_snapshots (
+        CREATE TABLE yield_snapshots (
             time TIMESTAMPTZ NOT NULL,
             pool_id VARCHAR(64) NOT NULL,
             protocol VARCHAR(32) NOT NULL,
             symbol VARCHAR(32) NOT NULL,
             chain VARCHAR(32) DEFAULT 'Ethereum',
+            
             apy_total DOUBLE PRECISION,
+            apy_base DOUBLE PRECISION,
+            apy_reward DOUBLE PRECISION,
+            
             tvl_usd DOUBLE PRECISION,
             volume_24h_usd DOUBLE PRECISION DEFAULT 0,
             volatility_24h DOUBLE PRECISION DEFAULT 0,
             utilization_rate DOUBLE PRECISION DEFAULT 0,
+            
+            il_risk VARCHAR(32),
+            is_outlier BOOLEAN DEFAULT FALSE,
+            
             PRIMARY KEY (pool_id, time)
         );
 
