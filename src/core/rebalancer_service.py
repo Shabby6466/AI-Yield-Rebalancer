@@ -292,10 +292,19 @@ class RebalancerService:
             target_comp_bps = 0
             
             # Simple 1-asset execution for MVP
+            # Contract requires: newAaveBps + newCompoundBps == 10000
             if "aave" in top_allocation.protocol.lower():
                 target_aave_bps = 10000
+                target_comp_bps = 0
             elif "compound" in top_allocation.protocol.lower():
+                target_aave_bps = 0
                 target_comp_bps = 10000
+            else:
+                # Non-Aave/Compound pool (e.g. Uniswap, Curve) — route through Aave as proxy
+                # This is the safest on-chain option for the StrategyHub
+                target_aave_bps = 10000
+                target_comp_bps = 0
+                logger.info(f"   - Non-Hub protocol ({top_allocation.protocol}). Routing 100% to Aave as proxy.")
                 
             # EXECUTE ON-CHAIN
             try:
