@@ -154,17 +154,17 @@ def update_env(hub_addr, vault_addr):
     env_map["STRATEGY_HUB_ADDRESS"] = hub_addr
     
     # 4. Fill in other missing keys from current process Environment (passed by Docker)
+    # PRIORITIZE environment variables over what's in the file, to ensure sync with host
     for key in required_keys:
-        if key not in env_map:
-            val = os.getenv(key)
-            if val:
-                env_map[key] = val
-            else:
-                # Set sensible defaults for local dev if missing
-                if key == "NETWORK": env_map[key] = "local"
-                if key == "RPC_URL": env_map[key] = "http://anvil:8545"
-                if key == "ETHEREUM_RPC_URL": env_map[key] = "http://anvil:8545"
-                if key == "BASE_RPC_URL": env_map[key] = "http://anvil:8545"
+        val = os.getenv(key)
+        if val:
+            env_map[key] = val
+        elif key not in env_map:
+            # Set sensible defaults for local dev if missing AND not in env
+            if key == "NETWORK": env_map[key] = "local"
+            if key == "RPC_URL": env_map[key] = "http://anvil:8545"
+            if key == "ETHEREUM_RPC_URL": env_map[key] = "http://anvil:8545"
+            if key == "BASE_RPC_URL": env_map[key] = "http://anvil:8545"
     
     # 5. Write back to file
     try:
