@@ -407,3 +407,16 @@ streamlit run dashboard/app.py --server.port 8501
 #             "base": os.getenv("BASE_RPC_URL"),
 #             "local": os.getenv("RPC_URL", "http://localhost:8545") # Localhost or Docker env
 #         }        
+
+
+
+
+```
+docker compose run --rm trainer
+```
+
+```
+docker compose cp scripts/fund_vault.py rebalancer:/app/scripts/fund_vault.py
+
+docker compose exec rebalancer python3 scripts/fund_vault.py
+```

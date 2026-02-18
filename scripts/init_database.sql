@@ -38,6 +38,25 @@ CREATE TABLE yield_metrics (
     UNIQUE (time, asset_id)
 );
 
+-- 3. Yield Snapshots (Unified History for LSTM)
+-- Stores raw historical data fetched from DefiLlama
+CREATE TABLE yield_snapshots (
+    time TIMESTAMPTZ NOT NULL,
+    pool_id VARCHAR(64) NOT NULL,
+    protocol VARCHAR(32) NOT NULL,
+    symbol VARCHAR(32) NOT NULL,
+    chain VARCHAR(32) DEFAULT 'Ethereum',
+    
+    apy_total DOUBLE PRECISION,
+    tvl_usd DOUBLE PRECISION,
+    volume_24h_usd DOUBLE PRECISION DEFAULT 0,
+    volatility_24h DOUBLE PRECISION DEFAULT 0,
+    utilization_rate DOUBLE PRECISION DEFAULT 0,
+    
+    UNIQUE(pool_id, time)
+);
+
+
 -- Note: TimescaleDB extension is optional but recommended for production
 -- If you have TimescaleDB installed, uncomment the following:
 -- CREATE EXTENSION IF NOT EXISTS timescaledb;

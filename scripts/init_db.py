@@ -39,17 +39,18 @@ def init_db():
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS yield_snapshots (
             time TIMESTAMPTZ NOT NULL,
-            pool_id UUID NOT NULL,
-            protocol TEXT NOT NULL,
-            symbol TEXT NOT NULL,
+            pool_id VARCHAR(64) NOT NULL,
+            protocol VARCHAR(32) NOT NULL,
+            symbol VARCHAR(32) NOT NULL,
+            chain VARCHAR(32) DEFAULT 'Ethereum',
             apy_total DOUBLE PRECISION,
-            apy_base DOUBLE PRECISION,
-            apy_reward DOUBLE PRECISION,
             tvl_usd DOUBLE PRECISION,
-            il_risk TEXT,
-            is_outlier BOOLEAN DEFAULT FALSE,
-            PRIMARY KEY (time, pool_id)
+            volume_24h_usd DOUBLE PRECISION DEFAULT 0,
+            volatility_24h DOUBLE PRECISION DEFAULT 0,
+            utilization_rate DOUBLE PRECISION DEFAULT 0,
+            PRIMARY KEY (pool_id, time)
         );
+
         """
         cur.execute(create_table_sql)
         logger.info("✅ yield_snapshots table created.")
