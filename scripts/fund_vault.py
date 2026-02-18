@@ -84,6 +84,7 @@ def check_and_fund(keeper_addr, min_needed=50000):
 
 
     
+def main():
     if not KEEPER_PK:
         print("❌ Missing KEEPER_PRIVATE_KEY")
         sys.exit(1)
