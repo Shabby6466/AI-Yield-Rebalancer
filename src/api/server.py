@@ -726,14 +726,22 @@ async def get_vault_assets():
     try:
         logger.info(f"🔍 Checking Assets | Hub: {hub_address} | Vault: {vault_address}")
         
-        # 1. Hub Balances
-        hub = w3.eth.contract(address=hub_address, abi=clients['hub_abi'])
-        balances = await asyncio.to_thread(hub.functions.getBalances().call)
-        
-        aave_usd = float(balances[0]) / 1e6
-        comp_usd = float(balances[1]) / 1e6
-        idle_usd = float(balances[2]) / 1e6
-        total_usd = float(balances[3]) / 1e6
+        aave_usd = 0.0
+        comp_usd = 0.0
+        idle_usd = 0.0
+        total_usd = 0.0
+
+        # 1. Hub Balances (Graceful Failure)
+        try:
+            hub = w3.eth.contract(address=hub_address, abi=clients['hub_abi'])
+            balances = await asyncio.to_thread(hub.functions.getBalances().call)
+            
+            aave_usd = float(balances[0]) / 1e6
+            comp_usd = float(balances[1]) / 1e6
+            idle_usd = float(balances[2]) / 1e6
+            total_usd = float(balances[3]) / 1e6
+        except Exception as hub_err:
+            logger.warning(f"StrategyHub call failed (Address: {hub_address}): {hub_err}. Proceeding to fallback.")
         
         # 2. Fallback/Direct Vault Check if Hub reports 0 but we have a Vault address
         vault_direct = 0.0
