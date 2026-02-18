@@ -125,6 +125,7 @@ services:
       - BASE_RPC_URL=http://anvil:8545
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
       - BRAIN_API_HOST=brain
+      - VAULT_CONTRACT_ADDRESS=${VAULT_CONTRACT_ADDRESS}
     volumes:
       - .:/app
       - ./data:/app/data
