@@ -610,7 +610,7 @@ class RebalancerService:
 
         rebalance_tx = {
             'from': self.signer.address,
-            'to': os.getenv("STRATEGY_HUB_ADDRESS", "0x56d4d6aEe0278c5Df2FA23Ecb32eC146C9446FDf"),
+            'to': self.hub_address,
             'value': 0,
             'data': calldata,
             'nonce': self.w3.eth.get_transaction_count(self.signer.address),

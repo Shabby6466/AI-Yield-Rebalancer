@@ -21,36 +21,44 @@ class FlashbotsRelayer:
         """
         self.w3 = w3
         self.signer = signer
+        self.chain_id = w3.eth.chain_id
+        self.is_local = self.chain_id != 1  # Anything not mainnet uses direct send
         
-        # Initialize Flashbots middleware
-        # For Mainnet: "https://relay.flashbots.net"
-        # For Goerli: "https://relay-goerli.flashbots.net"
-        flashbots_relay_url = os.getenv("FLASHBOTS_RELAY_URL", "https://relay.flashbots.net")
-        flashbot(w3, signer, flashbots_relay_url)
-        
+        if not self.is_local:
+            # Only initialize Flashbots on real mainnet
+            flashbots_relay_url = os.getenv("FLASHBOTS_RELAY_URL", "https://relay.flashbots.net")
+            flashbot(w3, signer, flashbots_relay_url)
+            logger.info(f"Flashbots relay initialized for mainnet: {flashbots_relay_url}")
+        else:
+            logger.info(f"Local network detected (chain_id={self.chain_id}). Using direct tx send (no Flashbots).")
+
+    def _send_direct(self, tx: Dict[str, Any]) -> bool:
+        """Send a single transaction directly (for local/test networks)."""
+        try:
+            signed = self.signer.sign_transaction(tx)
+            tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+            if receipt['status'] == 1:
+                logger.info(f"✅ Direct tx confirmed: {tx_hash.hex()} (block {receipt['blockNumber']})")
+                return True
+            else:
+                logger.error(f"❌ Direct tx reverted: {tx_hash.hex()}")
+                return False
+        except Exception as e:
+            logger.error(f"Direct tx failed: {e}")
+            return False
+
     def send_rebalance_bundle(self, bundle: List[Dict[str, Any]], target_block: int) -> bool:
         """
-        Sends a bundle of transactions to the Flashbots relay.
-        
-        Args:
-            bundle: List of transaction objects
-            target_block: The block number this bundle is targeting
-            
-        Returns:
-            True if successfully included or sent, False otherwise
+        Sends a bundle of transactions. Uses Flashbots on mainnet, direct send on local.
         """
+        if self.is_local:
+            logger.info(f"[Local Mode] Sending {len(bundle)} tx(s) directly...")
+            return all(self._send_direct(tx) for tx in bundle)
+
         logger.info(f"Targeting block {target_block} for Flashbots bundle...")
-        
-        # Prepare the list of transactions for Flashbots
-        # Flashbots expects [{ "signer": account, "transaction": tx }]
-        flash_bundle = []
-        for tx in bundle:
-            flash_bundle.append({
-                "signer": self.signer,
-                "transaction": tx
-            })
+        flash_bundle = [{"signer": self.signer, "transaction": tx} for tx in bundle]
             
-        # Simulate the bundle first to ensure it won't revert
         try:
             simulation = self.w3.flashbots.simulate(flash_bundle, target_block)
             logger.info(f"Bundle simulation successful: {simulation}")
@@ -58,12 +66,8 @@ class FlashbotsRelayer:
             logger.error(f"Bundle simulation failed: {e}")
             return False
             
-        # Send the bundle
         send_result = self.w3.flashbots.send_bundle(flash_bundle, target_block)
-        
-        # Wait for the result (non-blocking in a real keeper, but synchronous for now)
         send_result.wait()
-        
 
         try:
             receipts = send_result.receipts()
@@ -74,6 +78,9 @@ class FlashbotsRelayer:
             return False
 
     def relay_with_retry(self, tx_list, retry_count=3):
+        if self.is_local:
+            # On local, just send directly — no retry needed
+            return self.send_rebalance_bundle(tx_list, 0)
         current_block = self.w3.eth.block_number
         for i in range(1, retry_count + 1):
             target = current_block + i
