@@ -96,6 +96,13 @@ class RebalancerService:
         if not self.hub_address:
              # Final fallback to a well-known address if absolutely nothing found
              self.hub_address = "0x09be87b1E6D1d3B9f11Bf0983320F9f05CD7bFE1"
+        
+        # Load Vault Address for Fallback
+        self.vault_address = os.getenv("VAULT_CONTRACT_ADDRESS")
+        if not self.vault_address and os.path.exists("contracts/deployed_address.txt"):
+             # Try to find it in the file if not in env? 
+             # For now, rely on ENV or strict fallback
+             pass
 
         self.guard = CircuitBreaker(self.w3, self.hub_address, ml_service=self.ml_service)
         self.hands = FlashbotsRelayer(self.w3, self.signer)
@@ -185,6 +192,22 @@ class RebalancerService:
             comp_bal = float(on_chain_balances[1]) / 1e6
             idle_bal = float(on_chain_balances[2]) / 1e6
             total_vault_usd = float(on_chain_balances[3]) / 1e6
+
+            # --- FALLBACK: Direct Vault Check ---
+            # If Hub says 0 but we have a Vault address, check Vault directly
+            if total_vault_usd == 0 and self.vault_address:
+                try:
+                    usdc_contract = self.w3.eth.contract(address=self.usdc_address, abi=self.erc20_abi)
+                    vault_bal_raw = await asyncio.to_thread(usdc_contract.functions.balanceOf(self.vault_address).call)
+                    vault_bal_usd = float(vault_bal_raw) / 1e6
+                    
+                    if vault_bal_usd > 0:
+                        logger.info(f"⚠️ Hub reported 0, but Vault directly holds ${vault_bal_usd:,.2f}. Using fallback.")
+                        total_vault_usd = vault_bal_usd
+                        idle_bal = vault_bal_usd
+                except Exception as e:
+                     logger.warning(f"Fallback vault check failed: {e}")
+            # ------------------------------------
             
             # Determine current position symbol for APY comparison
             if aave_bal > 10.0 and comp_bal > 10.0:
