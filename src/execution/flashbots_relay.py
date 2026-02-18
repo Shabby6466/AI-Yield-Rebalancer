@@ -22,7 +22,10 @@ class FlashbotsRelayer:
         self.w3 = w3
         self.signer = signer
         self.chain_id = w3.eth.chain_id
-        self.is_local = self.chain_id != 1  # Anything not mainnet uses direct send
+        
+        # Detect local mode by RPC URL (Anvil forks mainnet so chain_id=1 is not reliable)
+        rpc_url = os.getenv("RPC_URL", "http://localhost:8545").lower()
+        self.is_local = any(h in rpc_url for h in ["localhost", "127.0.0.1", "anvil", "0.0.0.0"])
         
         if not self.is_local:
             # Only initialize Flashbots on real mainnet
@@ -30,7 +33,7 @@ class FlashbotsRelayer:
             flashbot(w3, signer, flashbots_relay_url)
             logger.info(f"Flashbots relay initialized for mainnet: {flashbots_relay_url}")
         else:
-            logger.info(f"Local network detected (chain_id={self.chain_id}). Using direct tx send (no Flashbots).")
+            logger.info(f"Local network detected (RPC: {rpc_url}). Using direct tx send (no Flashbots).")
 
     def _send_direct(self, tx: Dict[str, Any]) -> bool:
         """Send a single transaction directly (for local/test networks)."""
