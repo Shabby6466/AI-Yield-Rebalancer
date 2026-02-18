@@ -232,6 +232,12 @@ pnpm-lock.yaml
 # ============================================================================
 # Project-Specific
 # ============================================================================
+# Runtime state — server-specific, never commit (causes merge conflicts)
+data/system_state.json
+
+# Model checkpoints (large binary files)
+models/checkpoints/
+
 # Private research notes
 PRIVATE_NOTES.md
 TODO_PRIVATE.md
