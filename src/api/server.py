@@ -119,11 +119,29 @@ async def lifespan(app: FastAPI):
     # Initialize Web3 for on-chain state (Vault Assets)
     rpc_url = os.getenv("RPC_URL", "http://localhost:8545")
     w3 = Web3(Web3.HTTPProvider(rpc_url))
+    # Load StrategyHub Address with Priority: Env Var > .env > File
     hub_address = os.getenv("STRATEGY_HUB_ADDRESS")
     
+    if not hub_address and os.path.exists(".env"):
+        try:
+            with open(".env") as f:
+                for line in f:
+                    if "STRATEGY_HUB_ADDRESS" in line:
+                         parts = line.strip().split("=")
+                         if len(parts) > 1:
+                             hub_address = parts[1]
+                             logger.info(f"Loaded StrategyHub from .env: {hub_address}")
+        except Exception: pass
+
     if not hub_address and os.path.exists("contracts/deployed_address.txt"):
         with open("contracts/deployed_address.txt", "r") as f:
             hub_address = f.read().strip()
+            logger.info(f"Loaded StrategyHub from file: {hub_address}")
+
+    if not hub_address:
+        logger.warning("⚠️ No StrategyHub address found. Defaulting to known testnet address (may fail).")
+        hub_address = "0xe6DF612E4ae0F2284CD4959Fca047171C10D9402" # Hardcoded backup
+
     
     clients['w3'] = w3
     clients['hub_address'] = hub_address
