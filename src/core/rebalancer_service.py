@@ -291,6 +291,32 @@ class RebalancerService:
         else:
             logger.info(f"🟢 HOLD POSITION: {decision['summary']}")
 
+        # 8. RECORD: Save to Database for Dashboard
+        try:
+            target_meta = None
+            if decision.get('allocations') and len(decision['allocations']) > 0:
+                 alloc = decision['allocations'][0]
+                 # Handle both object and dict access for safety
+                 target_meta = {
+                     'pool': getattr(alloc, 'pool_id', "unknown"),
+                     'apy': getattr(alloc, 'apy', 0.0),
+                     'symbol': getattr(alloc, 'symbol', "unknown"),
+                     'project': getattr(alloc, 'protocol', "unknown")
+                 }
+
+            await self._record_cycle_prediction(
+                weights=np.array([1.0]), 
+                features=np.zeros((1, 32)), 
+                forced_type=decision['status'],
+                forced_reason=decision['summary'],
+                target_pool=target_meta,
+                metrics={
+                    'total_usd': float(total_vault_usd)
+                }
+            )
+        except Exception as e:
+            logger.error(f"Failed to record cycle to DB: {e}")
+
         # Cleanup
         await self.defillama.close()
 
