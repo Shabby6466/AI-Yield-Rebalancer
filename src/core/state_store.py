@@ -51,5 +51,10 @@ class StateStore:
             "current_pool_symbol": "CASH",
             "current_apy": 0.0,
             "initial_capital": 0.0,
-            "cumulative_costs": 0.0
+            "cumulative_costs": 0.0,
+            "total_yield_earned": 0.0,
+            "net_roi_pct": 0.0,
+            "last_harvest_time": None,
+            "last_harvest_yield": 0.0,
+            "current_total_value": 0.0,
         }

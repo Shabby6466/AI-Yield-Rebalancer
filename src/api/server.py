@@ -743,7 +743,11 @@ async def get_vault_assets():
         
     try:
         logger.info(f"🔍 Checking Assets | Hub: {hub_address} | Vault: {vault_address}")
-        
+
+        # Load yield/ROI state
+        from src.core.state_store import StateStore as _StateStore
+        state = _StateStore().load_state()
+
         aave_usd = 0.0
         comp_usd = 0.0
         idle_usd = 0.0
@@ -789,8 +793,15 @@ async def get_vault_assets():
                 "Idle USDC": idle_usd
             },
             "total_usd": total_usd,
+            # ── Yield & ROI from StateStore ──────────────────────────────
+            "net_roi_pct": state.get("net_roi_pct", 0.0),
+            "total_yield_earned": state.get("total_yield_earned", 0.0),
+            "initial_capital": state.get("initial_capital", 0.0),
+            "last_harvest_time": state.get("last_harvest_time"),
+            # ─────────────────────────────────────────────────────────────
             "timestamp": datetime.now().isoformat()
         }
+
     except Exception as e:
         logger.error(f"Failed to fetch vault assets: {e}")
         # Try to return partial data if possible or at least the address being used
@@ -811,6 +822,87 @@ async def execute_rebalance(
     """
     # Logic to trigger on-chain transaction
     return {"status": "Rebalancing queued", "tx_hash": "pending"}
+
+
+@app.post("/admin/harvest")
+async def trigger_harvest(days: float = 30.0):
+    """
+    Simulate yield harvest by fast-forwarding Anvil time by `days` days.
+    Reads aToken/cToken balance growth as yield earned and updates StateStore.
+    """
+    hub_address = clients.get('hub_address')
+    w3 = clients.get('w3')
+    if not hub_address or not w3:
+        raise HTTPException(status_code=503, detail="Hub connection not initialized")
+
+    try:
+        HUB_ABI = [{"name":"getBalances","type":"function","inputs":[],"outputs":[
+            {"name":"aaveBalance","type":"uint256"},{"name":"compoundBalance","type":"uint256"},
+            {"name":"idleBalance","type":"uint256"},{"name":"total","type":"uint256"}
+        ]}]
+        hub = w3.eth.contract(address=hub_address, abi=HUB_ABI)
+
+        balances_before = await asyncio.to_thread(hub.functions.getBalances().call)
+        total_before = balances_before[3]
+
+        # Fast-forward time and mine blocks
+        seconds = int(days * 86400)
+        await asyncio.to_thread(w3.provider.make_request, "evm_increaseTime", [seconds])
+        await asyncio.to_thread(w3.provider.make_request, "anvil_mine", [100])
+
+        balances_after = await asyncio.to_thread(hub.functions.getBalances().call)
+        total_after = balances_after[3]
+
+        yield_earned_usd = max(0.0, (total_after - total_before) / 1e6)
+
+        from src.core.state_store import StateStore as _SS
+        ss = _SS()
+        st = ss.load_state()
+        initial_capital = st.get("initial_capital", 0.0) or (total_before / 1e6)
+        prev_yield = st.get("total_yield_earned", 0.0)
+        new_total_yield = prev_yield + yield_earned_usd
+        net_roi_pct = (new_total_yield / initial_capital * 100.0) if initial_capital > 0 else 0.0
+
+        import time as _time
+        ss.update_state(
+            initial_capital=initial_capital,
+            total_yield_earned=round(new_total_yield, 6),
+            net_roi_pct=round(net_roi_pct, 6),
+            last_harvest_time=_time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+            last_harvest_yield=round(yield_earned_usd, 6),
+            current_total_value=round(total_after / 1e6, 6),
+        )
+
+        return {
+            "status": "success",
+            "days_simulated": days,
+            "yield_earned_usd": round(yield_earned_usd, 4),
+            "total_yield_earned": round(new_total_yield, 4),
+            "net_roi_pct": round(net_roi_pct, 4),
+            "initial_capital": round(initial_capital, 2),
+            "total_value_usd": round(total_after / 1e6, 2),
+            "aave_usd": round(balances_after[0] / 1e6, 4),
+            "compound_usd": round(balances_after[1] / 1e6, 4),
+        }
+    except Exception as e:
+        logger.error(f"Harvest failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin/harvest")
+async def get_harvest_state():
+    """Return current yield/ROI state without simulating."""
+    from src.core.state_store import StateStore as _SS
+    state = _SS().load_state()
+    return {
+        "net_roi_pct": state.get("net_roi_pct", 0.0),
+        "total_yield_earned": state.get("total_yield_earned", 0.0),
+        "initial_capital": state.get("initial_capital", 0.0),
+        "last_harvest_time": state.get("last_harvest_time"),
+        "last_harvest_yield": state.get("last_harvest_yield", 0.0),
+        "current_total_value": state.get("current_total_value", 0.0),
+    }
+
 
 if __name__ == "__main__":
     import uvicorn

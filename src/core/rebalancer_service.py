@@ -320,8 +320,8 @@ class RebalancerService:
             try:
                 txs = self._construct_rebalance_txs("", target_aave_bps, target_comp_bps)
                 for tx in txs:
-                   res = await asyncio.to_thread(self.hands.relay_with_retry, [tx])
-                   if res:
+                    res = await asyncio.to_thread(self.hands.relay_with_retry, [tx])
+                    if res:
                         logger.info(f"🚀 REBALANCE SUCCESSFUL: Moved funds to {top_allocation.symbol}")
                         self.last_rebalance_time = datetime.utcnow()
                         self.state_store.update_state(
@@ -329,8 +329,38 @@ class RebalancerService:
                              current_pool_symbol=top_allocation.symbol,
                              current_apy=top_allocation.apy
                         )
+                        # ── Post-rebalance yield snapshot ──────────────────
+                        try:
+                            HUB_VALUE_ABI = [{"name":"totalValue","type":"function","inputs":[],"outputs":[{"type":"uint256"}]}]
+                            hub_c = self.w3.eth.contract(address=self.hub_address, abi=HUB_VALUE_ABI)
+                            total_value_raw = hub_c.functions.totalValue().call()
+                            total_value_usd = total_value_raw / 1e6
+
+                            st = self.state_store.load_state()
+                            initial_capital = st.get("initial_capital", 0.0)
+                            if initial_capital == 0.0:
+                                # Bootstrap on first rebalance
+                                initial_capital = total_value_usd
+                                logger.info(f"💰 Bootstrapping initial_capital = ${initial_capital:,.2f}")
+
+                            prev_yield = st.get("total_yield_earned", 0.0)
+                            yield_delta = max(0.0, total_value_usd - initial_capital - prev_yield)
+                            new_total_yield = prev_yield + yield_delta
+                            net_roi_pct = (new_total_yield / initial_capital * 100.0) if initial_capital > 0 else 0.0
+
+                            self.state_store.update_state(
+                                initial_capital=initial_capital,
+                                total_yield_earned=round(new_total_yield, 6),
+                                net_roi_pct=round(net_roi_pct, 6),
+                                current_total_value=round(total_value_usd, 6),
+                            )
+                            logger.info(f"📈 Net ROI: {net_roi_pct:.4f}% | Yield earned: ${new_total_yield:.4f} | Total: ${total_value_usd:,.2f}")
+                        except Exception as roi_err:
+                            logger.warning(f"ROI snapshot failed (non-critical): {roi_err}")
+                        # ───────────────────────────────────────────────────
             except Exception as e:
                 logger.error(f"Execution Error: {e}")
+
         else:
             logger.info(f"🟢 HOLD POSITION: {decision['summary']}")
 
