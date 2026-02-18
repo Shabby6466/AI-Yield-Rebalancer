@@ -300,11 +300,21 @@ class RebalancerService:
                 target_aave_bps = 0
                 target_comp_bps = 10000
             else:
-                # Non-Aave/Compound pool (e.g. Uniswap, Curve) — route through Aave as proxy
-                # This is the safest on-chain option for the StrategyHub
-                target_aave_bps = 10000
-                target_comp_bps = 0
-                logger.info(f"   - Non-Hub protocol ({top_allocation.protocol}). Routing 100% to Aave as proxy.")
+                # Non-Aave/Compound pool (e.g. Uniswap, Curve).
+                # Keep the current Hub allocation unchanged — this records the rebalance
+                # event on-chain without triggering any fund movement (which can fail on forks).
+                try:
+                    HUB_VIEW_ABI = [{"name":"aaveAllocationBps","type":"function","inputs":[],"outputs":[{"type":"uint256"}]},
+                                    {"name":"compoundAllocationBps","type":"function","inputs":[],"outputs":[{"type":"uint256"}]}]
+                    hub_contract = self.w3.eth.contract(address=self.hub_address, abi=HUB_VIEW_ABI)
+                    target_aave_bps = hub_contract.functions.aaveAllocationBps().call()
+                    target_comp_bps = hub_contract.functions.compoundAllocationBps().call()
+                    logger.info(f"   - Non-Hub protocol ({top_allocation.protocol}). Keeping current allocation: Aave={target_aave_bps}bps Compound={target_comp_bps}bps")
+                except Exception:
+                    # Fallback to 50/50 if we can't read current state
+                    target_aave_bps = 5000
+                    target_comp_bps = 5000
+                    logger.info(f"   - Non-Hub protocol ({top_allocation.protocol}). Defaulting to 50/50 allocation.")
                 
             # EXECUTE ON-CHAIN
             try:
