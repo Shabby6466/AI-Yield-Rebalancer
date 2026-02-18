@@ -17,11 +17,13 @@ def get_cast_path():
     cast = shutil.which("cast")
     if not cast:
         cast = "/root/.foundry/bin/cast"  # Docker default
-    return cast
+    return str(cast)
 
 def run_cast(args):
     cast = get_cast_path()
-    cmd = [cast] + args + ["--rpc-url", RPC_URL, "--private-key", KEEPER_PK]
+    # Ensure all args are strings
+    cmd_args = [str(arg) for arg in args]
+    cmd = [cast] + cmd_args + ["--rpc-url", str(RPC_URL), "--private-key", str(KEEPER_PK)]
     
     print(f"Running: {' '.join(cmd)}")  # Debug (careful with PK not printed)
     # Mask PK in print
@@ -38,6 +40,49 @@ def run_cast(args):
     print(f"✅ Success: {res.stdout.strip()}")
     return True
 
+def check_and_fund(keeper_addr, min_needed=50000):
+    cast = get_cast_path()
+    
+    # 0. Get current balance
+    # cast call $USDC "balanceOf(address)(uint256)" $KEEPER
+    cmd = [cast, "call", USDC_ADDR, "balanceOf(address)(uint256)", keeper_addr, "--rpc-url", RPC_URL]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    
+    current_bal = 0
+    if res.returncode == 0:
+        try:
+            current_bal = int(res.stdout.strip())
+        except ValueError:
+            current_bal = 0
+            
+    print(f"📊 Current Keeper Balance: {current_bal / 10**6:,.2f} USDC")
+    
+    needed_wei = min_needed * 10**6
+    if current_bal >= needed_wei:
+        print("✅ Balance sufficient.")
+        return
+
+    print("⚠️ Balance insufficient. Stealing from whale...")
+    
+    WHALE = "0xA9D1e08C7793af67e9d92fe308d5697FB81d3E43" # Coinbase (USDC Whale)
+    amount_to_steal = needed_wei * 2 # Steal double ensuring buffer
+    
+    # 1. Impersonate
+    subprocess.run([cast, "rpc", "anvil_impersonateAccount", WHALE, "--rpc-url", RPC_URL], stdout=subprocess.DEVNULL)
+    
+    # 2. Transfer
+    subprocess.run([
+        cast, "send", USDC_ADDR, 
+        "transfer(address,uint256)", keeper_addr, str(amount_to_steal),
+        "--from", WHALE, "--rpc-url", RPC_URL, "--unlocked"
+    ], stdout=subprocess.DEVNULL)
+    
+    # 3. Stop impersonating
+    subprocess.run([cast, "rpc", "anvil_stopImpersonatingAccount", WHALE, "--rpc-url", RPC_URL], stdout=subprocess.DEVNULL)
+    
+    print(f"✅ Stole {amount_to_steal / 10**6:,.2f} USDC from the whale.")
+
+
 def main():
     if not KEEPER_PK or not VAULT_ADDR:
         print("❌ Missing environment variables (KEEPER_PRIVATE_KEY or VAULT_CONTRACT_ADDRESS)")
@@ -51,7 +96,13 @@ def main():
         except: pass
         sys.exit(1)
 
-    print(f"💰 Funding Vault {VAULT_ADDR} from Keeper...")
+    cast = get_cast_path()
+    keeper_addr = subprocess.run([cast, "wallet", "address", "--private-key", KEEPER_PK], capture_output=True, text=True).stdout.strip()
+    
+    print(f"💰 Funding Vault {VAULT_ADDR} from Keeper {keeper_addr}...")
+    
+    # 0. Check & Fund
+    check_and_fund(keeper_addr)
     
     # 1. Approve Vault to spend USDC
     # approve(address spender, uint256 amount)
