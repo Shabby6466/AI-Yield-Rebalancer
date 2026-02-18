@@ -1,19 +1,9 @@
-"""
-APY-Based Trade Sizing Engine
-Instead of 100% all-in, allocates capital proportionally based on:
-- Risk-adjusted yield (Sharpe-like scoring)
-- TVL depth (larger pools get more trust)
-- Yield stability (volatile APYs get less allocation)
-- Max position cap (never more than X% in one pool)
-"""
-
 import logging
 import math
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class PoolAllocation:
@@ -24,40 +14,19 @@ class PoolAllocation:
     protocol: str
     apy: float
     tvl_usd: float
-    score: float           # Risk-adjusted score (0-100)
-    allocation_pct: float  # % of capital to allocate
-    allocation_usd: float  # $ amount to allocate
+    score: float           
+    allocation_pct: float  
+    allocation_usd: float  
     reason: str
 
-
 class TradeSizer:
-    """
-    Determines HOW MUCH to put into each pool, not just WHICH pool.
-    
-    Scoring Formula:
-        Score = (APY_Weight * Normalized_APY) 
-              + (TVL_Weight * Normalized_TVL) 
-              - (Volatility_Penalty * Normalized_Vol)
-    
-    Then allocations are proportional to scores, capped at max_single_allocation.
-    """
-
     def __init__(self, 
-                 max_single_allocation: float = 0.50,  # Max 50% in one pool
-                 min_allocation: float = 0.05,          # Min 5% to bother
-                 max_pools: int = 3,                     # Max 3 concurrent positions
-                 apy_weight: float = 0.5,
-                 tvl_weight: float = 0.3,
+                 max_single_allocation: float = 0.40,  
+                 min_allocation: float = 0.10,         
+                 max_pools: int = 4,                   
+                 apy_weight: float = 0.4,
+                 tvl_weight: float = 0.4,              
                  stability_weight: float = 0.2):
-        """
-        Args:
-            max_single_allocation: Maximum % of capital in any single pool
-            min_allocation: Minimum % to allocate (below this, skip the pool)
-            max_pools: Maximum number of pools to split across
-            apy_weight: How much to weight raw APY (0-1)
-            tvl_weight: How much to weight TVL depth (0-1)
-            stability_weight: How much to penalize volatility (0-1)
-        """
         self.max_single = max_single_allocation
         self.min_alloc = min_allocation
         self.max_pools = max_pools
@@ -66,203 +35,131 @@ class TradeSizer:
         self.w_stability = stability_weight
 
     def score_pool(self, pool: Dict, all_pools: List[Dict]) -> float:
-        """
-        Calculate a risk-adjusted score for a single pool.
-        
-        Args:
-            pool: Pool data dict with 'apy', 'tvl_usd', etc.
-            all_pools: All candidate pools (for normalization)
-            
-        Returns:
-            Score between 0-100
-        """
-        if not all_pools:
-            return 0
+        """Calculate a risk-adjusted score (0-100)"""
+        if not all_pools: return 0
 
-        # Normalize APY (0-1 range relative to peers)
+        # 1. Normalize APY
         max_apy = max(p.get('apy', 0) for p in all_pools)
         min_apy = min(p.get('apy', 0) for p in all_pools)
         apy_range = max_apy - min_apy if max_apy != min_apy else 1
         norm_apy = (pool.get('apy', 0) - min_apy) / apy_range
 
-        # Normalize TVL (log scale, higher = better = more liquid)
-        tvl = pool.get('tvl_usd', 0) or pool.get('tvlUsd', 0)
-        max_tvl = max(p.get('tvl_usd', 0) or p.get('tvlUsd', 0) for p in all_pools)
+        # 2. Normalize TVL (Log scale)
+        tvl = pool.get('tvlUsd', 0) or pool.get('tvl_usd', 1)
+        max_tvl = max(p.get('tvlUsd', 1) or p.get('tvl_usd', 1) for p in all_pools)
         norm_tvl = math.log10(max(tvl, 1)) / math.log10(max(max_tvl, 10))
 
-        # Volatility penalty (if available)
-        # Use apy_pct1D (1-day change) as a proxy for instability
+        # 3. Volatility Penalty
         apy_change = abs(pool.get('apyPct1D', 0) or 0)
-        # Normalize: >50% daily change is very volatile
         vol_penalty = min(apy_change / 50, 1.0)
 
-        # Weighted score
-        score = (
-            self.w_apy * norm_apy * 100
-            + self.w_tvl * norm_tvl * 100
-            - self.w_stability * vol_penalty * 100
-        )
-
+        score = (self.w_apy * norm_apy * 100 + 
+                 self.w_tvl * norm_tvl * 100 - 
+                 self.w_stability * vol_penalty * 100)
+        
         return max(0, min(100, score))
 
-    def size_positions(self, 
-                       candidate_pools: List[Dict], 
-                       total_capital: float,
-                       current_pool_id: str = None) -> List[PoolAllocation]:
-        """
-        Given a list of candidate pools and total capital,
-        return sized allocations for each.
-        
-        Args:
-            candidate_pools: List of pool dicts (pre-filtered for eligibility)
-            total_capital: Total USD to allocate
-            current_pool_id: Pool we're currently in (gets a loyalty bonus)
-            
-        Returns:
-            List of PoolAllocation objects, sorted by allocation descending
-        """
-        if not candidate_pools:
-            return []
-
-        # Score all pools
-        scored = []
-        for pool in candidate_pools:
-            score = self.score_pool(pool, candidate_pools)
-            
-            # Loyalty bonus: slight preference for current pool (avoid unnecessary moves)
-            pool_id = pool.get('pool_id', pool.get('pool', ''))
-            if current_pool_id and pool_id == current_pool_id:
-                score *= 1.1  # 10% bonus for staying put
-            
-            scored.append((pool, score))
-
-        # Sort by score descending, take top N
-        scored.sort(key=lambda x: x[1], reverse=True)
-        top = scored[:self.max_pools]
-
-        # Calculate proportional allocations
-        total_score = sum(s for _, s in top)
-        if total_score == 0:
-            return []
-
-        allocations = []
-        remaining_capital = total_capital
-
-        for pool, score in top:
-            # Proportional allocation
-            raw_pct = score / total_score
-            
-            # Apply cap
-            capped_pct = min(raw_pct, self.max_single)
-            
-            # Skip if below minimum
-            if capped_pct < self.min_alloc:
-                continue
-            
-            alloc_usd = total_capital * capped_pct
-            pool_id = pool.get('pool_id', pool.get('pool', ''))
-            
-            allocations.append(PoolAllocation(
-                pool_id=pool_id,
-                symbol=pool.get('symbol', 'unknown'),
-                chain=pool.get('chain', ''),
-                protocol=pool.get('protocol', pool.get('project', '')),
-                apy=pool.get('apy', 0),
-                tvl_usd=pool.get('tvl_usd', 0) or pool.get('tvlUsd', 0),
-                score=round(score, 2),
-                allocation_pct=round(capped_pct * 100, 2),
-                allocation_usd=round(alloc_usd, 2),
-                reason=self._explain(pool, score, capped_pct)
-            ))
-
-        # Normalize so total = 100%
-        total_allocated = sum(a.allocation_pct for a in allocations)
-        if total_allocated > 0 and total_allocated != 100:
-            scale = 100 / total_allocated
-            for a in allocations:
-                a.allocation_pct = round(a.allocation_pct * scale, 2)
-                a.allocation_usd = round(total_capital * a.allocation_pct / 100, 2)
-
-        return allocations
-
     def _explain(self, pool: Dict, score: float, pct: float) -> str:
-        """Generate human-readable explanation for the allocation"""
-        apy = pool.get('apy', 0)
-        tvl = pool.get('tvl_usd', 0) or pool.get('tvlUsd', 0)
+        """Generates the reasoning for the AI decision"""
+        factors = []
+        if pool.get('apy', 0) > 10: factors.append("Aggressive Yield")
+        if (pool.get('tvlUsd', 0) or 0) > 100_000_000: factors.append("Institutional Liquidity")
+        if abs(pool.get('apyPct1D', 0) or 0) < 1: factors.append("Stable Returns")
         
-        reasons = []
-        if apy > 20:
-            reasons.append(f"High yield ({apy:.1f}%)")
-        elif apy > 5:
-            reasons.append(f"Moderate yield ({apy:.1f}%)")
-        else:
-            reasons.append(f"Low yield ({apy:.1f}%)")
-        
-        if tvl > 100_000_000:
-            reasons.append("Deep liquidity")
-        elif tvl > 10_000_000:
-            reasons.append("Good liquidity")
-        else:
-            reasons.append("Thin liquidity")
-        
-        return f"Score {score:.0f}/100. {'. '.join(reasons)}. Allocation: {pct*100:.1f}%"
+        return f"Score {score:.1f}. Factors: {', '.join(factors)}. Target: {pct*100:.1f}% weight."
 
-    def recommend(self, candidate_pools: List[Dict], total_capital: float,
-                  current_pool_id: str = None) -> Dict:
-        """
-        High-level recommendation with summary.
+    def size_positions(self, candidate_pools: List[Dict], total_capital: float, current_pool_id: Optional[str] = None) -> List[PoolAllocation]:
+        """Core logic for determining weights"""
+        if not candidate_pools: return []
+
+        scored_pools = []
+        for p in candidate_pools:
+            score = self.score_pool(p, candidate_pools)
+            p_id = p.get('pool')
+            if current_pool_id and p_id == current_pool_id:
+                score *= 1.15 # Loyalty bonus
+            scored_pools.append({'data': p, 'score': score})
+
+        scored_pools.sort(key=lambda x: x['score'], reverse=True)
         
-        Returns:
-            Dict with 'allocations', 'summary', 'diversification_score'
-        """
+        final_allocs = []
+        allocated_pct = 0.0
+        seen_assets = set()
+        seen_protocols = set()
+
+        for item in scored_pools:
+            if len(final_allocs) >= self.max_pools or allocated_pct >= 1.0: break
+            
+            p = item['data']
+            score = item['score']
+            symbol = p.get('symbol', '').upper()
+            protocol = p.get('project', '').lower()
+
+            # Diversification Penalties
+            for asset in ["USDC", "USDT", "DAI"]:
+                if asset in symbol and asset in seen_assets:
+                    score *= 0.7 
+            if protocol in seen_protocols:
+                score *= 0.8
+
+            target_pct = min(self.max_single, score / 100)
+            if target_pct < self.min_alloc: continue
+
+            # Ensure we don't over-allocate
+            if allocated_pct + target_pct > 1.0:
+                target_pct = 1.0 - allocated_pct
+
+            final_allocs.append(PoolAllocation(
+                pool_id=p.get('pool'),
+                symbol=symbol,
+                chain=p.get('chain'),
+                protocol=protocol,
+                apy=p.get('apy'),
+                tvl_usd=p.get('tvlUsd'),
+                score=round(score, 2),
+                allocation_pct=round(target_pct * 100, 2),
+                allocation_usd=round(total_capital * target_pct, 2),
+                reason=self._explain(p, score, target_pct)
+            ))
+            
+            allocated_pct += target_pct
+            for asset in ["USDC", "USDT", "DAI"]:
+                if asset in symbol: seen_assets.add(asset)
+            seen_protocols.add(protocol)
+
+        return final_allocs
+
+    def recommend(self, candidate_pools: List[Dict], total_capital: float, current_pool_id: Optional[str] = None) -> Dict:
+        """Orchestrates the sizing and returns a summary for the API"""
         allocs = self.size_positions(candidate_pools, total_capital, current_pool_id)
         
         if not allocs:
-            return {
-                "allocations": [],
-                "summary": "No suitable pools found for allocation.",
-                "diversification_score": 0
-            }
-
-        # Diversification score: 1 = all in one pool, 100 = perfectly spread
-        if len(allocs) == 1:
-            div_score = 10
-        else:
-            # Herfindahl Index (lower concentration = higher diversification)
-            hhi = sum((a.allocation_pct / 100) ** 2 for a in allocs)
-            div_score = int((1 - hhi) * 100)
+            return {"status": "HOLD", "allocations": [], "summary": "No pools passed safety filters."}
 
         total_weighted_apy = sum(a.apy * a.allocation_pct / 100 for a in allocs)
-
-        summary = (
-            f"Recommended: Split ${total_capital:,.0f} across {len(allocs)} pools. "
-            f"Weighted APY: {total_weighted_apy:.2f}%. "
-            f"Diversification: {div_score}/100."
-        )
+        
+        # Calculate Diversification (HHI Index)
+        # Higher index = more concentrated (worse)
+        hhi = sum((a.allocation_pct / 100) ** 2 for a in allocs)
+        div_score = int((1 - hhi) * 100)
 
         return {
-            "allocations": allocs,
-            "summary": summary,
+            "status": "REBALANCE",
+            "weighted_apy": round(total_weighted_apy, 2),
             "diversification_score": div_score,
-            "weighted_apy": round(total_weighted_apy, 2)
+            "allocations": allocs,
+            "summary": f"Split ${total_capital:,.0f} across {len(allocs)} pools. Div Score: {div_score}/100."
         }
 
-
 if __name__ == "__main__":
-    # Quick test with mock data
-    mock_pools = [
-        {"pool": "aave-usdc", "symbol": "USDC", "chain": "Ethereum", "project": "aave-v3",
-         "apy": 8.5, "tvlUsd": 500_000_000, "stablecoin": True, "apyPct1D": 0.2},
-        {"pool": "comp-usdc", "symbol": "USDC", "chain": "Base", "project": "compound-v3",
-         "apy": 12.0, "tvlUsd": 200_000_000, "stablecoin": True, "apyPct1D": -1.5},
-        {"pool": "curve-3crv", "symbol": "DAI-USDC-USDT", "chain": "Ethereum", "project": "curve-dex",
-         "apy": 5.2, "tvlUsd": 800_000_000, "stablecoin": True, "apyPct1D": 0.1},
+    # Diagnostic Test
+    mock_data = [
+        {"pool": "1", "symbol": "USDC", "chain": "Base", "project": "aave-v3", "apy": 12.0, "tvlUsd": 200_000_000},
+        {"pool": "2", "symbol": "USDC", "chain": "Ethereum", "project": "aave-v3", "apy": 11.5, "tvlUsd": 500_000_000},
+        {"pool": "3", "symbol": "DAI", "chain": "Ethereum", "project": "maker", "apy": 5.0, "tvlUsd": 1_000_000_000}
     ]
-
-    sizer = TradeSizer(max_single_allocation=0.50, max_pools=3)
-    result = sizer.recommend(mock_pools, total_capital=100_000)
-    
-    print(result['summary'])
-    print()
-    for a in result['allocations']:
-        print(f"  {a.symbol} ({a.protocol}): ${a.allocation_usd:,.0f} ({a.allocation_pct}%) | APY: {a.apy}% | Score: {a.score}")
+    sizer = TradeSizer()
+    rec = sizer.recommend(mock_data, 100000)
+    print(rec['summary'])
+    for a in rec['allocations']:
+        print(f"-> {a.symbol} on {a.protocol}: {a.allocation_pct}% (${a.allocation_usd:,.0f})")

@@ -21,9 +21,9 @@ remappings = [
 ]
 
 # Fork settings
-[profile.fork]
-fork_url = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+# [profile.fork]
+# fork_url = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
 
 # RPC endpoints
-[rpc_endpoints]
-mainnet = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"
+# [rpc_endpoints]
+# mainnet = "https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}"

@@ -28,18 +28,12 @@ services:
   # 2. On-Chain Environment (Anvil Mainnet Fork)
   anvil:
     build: .
-    command: python3 -u scripts/auto_fork_manager.py
+    command: anvil --fork-url https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY} --host 0.0.0.0 --port 8545
     ports:
       - "8545:8545"
     logging: *default-logging
     environment:
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
-      - KEEPER_PRIVATE_KEY=${KEEPER_PRIVATE_KEY}
-      - RPC_URL=http://localhost:8545
-    volumes:
-      - .:/app
-      - ./contracts:/app/contracts
-      - ./deployments:/app/deployments
     healthcheck:
       test: [ "CMD-SHELL", "curl -f -X POST -H 'Content-Type: application/json' --data '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' http://localhost:8545 || exit 1" ]
       interval: 10s
@@ -140,6 +134,27 @@ services:
     ports:
       - "8501:8501"
     command: streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port 8501 --server.enableCORS false --server.enableXsrfProtection false
+
+  # 5. ML Trainer (One-off task for backfill & training)
+  trainer:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-admin}:${DB_PASSWORD:-fullstack_secured_2026}@db:5432/${DB_NAME:-rebalancer}
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    command: >
+      bash -c "
+        export PYTHONPATH=/app &&
+        echo '📥 Phase 1: Backfilling Historical Data (60 Days)...' &&
+        python3 scripts/backfill_history.py &&
+        echo '🧠 Phase 2: Retraining ML Models (LSTM & XGBoost)...' &&
+        python3 scripts/train_all_models.py &&
+        echo '✅ Training Complete. Models saved to /models.'
+      "
 
   # 5. Production Gateway (Nginx)
   gateway:

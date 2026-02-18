@@ -73,9 +73,15 @@ class DataAggregator:
             pools = await self.graph_client.get_uniswap_pools(first=50)
             protocol = await self.graph_client.get_uniswap_protocol_data()
 
+            # normalize pools: Graph client may return either a dict with "pools" key or a list
+            if isinstance(pools, dict):
+                pools_list = pools.get("pools", [])
+            else:
+                pools_list = pools or []
+
             return {
                 "protocol": "uniswap",
-                "pools": pools.get("pools", []),
+                "pools": pools_list,
                 "protocol_data": protocol,
                 "timestamp": datetime.utcnow().isoformat(),
             }

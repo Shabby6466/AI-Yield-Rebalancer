@@ -261,6 +261,67 @@ CREATE INDEX idx_drift_events_pool ON drift_events (pool_address, timestamp DESC
 CREATE INDEX idx_drift_events_timestamp ON drift_events (timestamp DESC);
 
 -- ============================================================================
+-- ROI & Performance Tracking Tables
+-- ============================================================================
+
+-- Track ROI per rebalance event
+CREATE TABLE IF NOT EXISTS rebalance_roi (
+    id SERIAL PRIMARY KEY,
+    rebalance_id INT REFERENCES rebalance_proposals(id),
+    tx_hash VARCHAR(255),
+    entry_portfolio_value_usd FLOAT NOT NULL, -- Portfolio value at rebalance start
+    entry_timestamp TIMESTAMP NOT NULL,
+    allocation_from JSONB, -- Previous allocation {protocol: percentage}
+    allocation_to JSONB,   -- New allocation {protocol: percentage}
+    gas_cost_usd FLOAT DEFAULT 0,
+    slippage_percent FLOAT DEFAULT 0,
+    net_cost_usd FLOAT, -- gas_cost + slippage
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_rebalance_roi_tx_hash ON rebalance_roi (tx_hash);
+CREATE INDEX idx_rebalance_roi_timestamp ON rebalance_roi (entry_timestamp DESC);
+
+-- Snapshot of ROI calculation at different time intervals
+CREATE TABLE IF NOT EXISTS roi_snapshots (
+    id SERIAL PRIMARY KEY,
+    rebalance_roi_id INT REFERENCES rebalance_roi(id),
+    snapshot_date TIMESTAMP NOT NULL,
+    current_portfolio_value_usd FLOAT NOT NULL,
+    yield_earned_usd FLOAT DEFAULT 0, -- Yield from protocols since rebalance
+    realized_gains_usd FLOAT DEFAULT 0, -- Gains from price moves
+    unrealized_gains_usd FLOAT DEFAULT 0, -- Unrealized P&L
+    total_gain_loss_usd FLOAT, -- Total P&L (yield + realized + unrealized)
+    roi_percent FLOAT, -- ROI% = (total_gain_loss / entry_value) * 100
+    apy_achieved_percent FLOAT, -- Annualized return based on holding period
+    status VARCHAR(50) DEFAULT 'active', -- 'active', 'closed'
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_roi_snapshots_rebalance ON roi_snapshots (rebalance_roi_id);
+CREATE INDEX idx_roi_snapshots_date ON roi_snapshots (snapshot_date DESC);
+
+-- Cumulative ROI statistics
+CREATE TABLE IF NOT EXISTS roi_summary (
+    id SERIAL PRIMARY KEY,
+    summary_date DATE NOT NULL UNIQUE,
+    total_rebalances_count INT DEFAULT 0,
+    cumulative_portfolio_gain_usd FLOAT DEFAULT 0,
+    cumulative_roi_percent FLOAT DEFAULT 0, -- Overall ROI since inception
+    net_yield_earned_usd FLOAT DEFAULT 0, -- Gross yield
+    total_gas_cost_usd FLOAT DEFAULT 0, -- Total gas spent
+    total_slippage_usd FLOAT DEFAULT 0, -- Total slippage
+    best_rebalance_roi_percent FLOAT,
+    worst_rebalance_roi_percent FLOAT,
+    avg_rebalance_roi_percent FLOAT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_roi_summary_date ON roi_summary (summary_date DESC);
+
+-- ============================================================================
 -- Audit & Logging Tables
 -- ============================================================================
 

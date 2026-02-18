@@ -54,143 +54,182 @@ def start_anvil():
         time.sleep(1)
     print("Failed to start node.")
 
-def deploy_contracts():
-    print("Deploying StrategyHub to local fork...")
-    # Mainnet addresses for StrategyHub
+def deal_usdc(target_address, amount_usdc):
+    """Grant USDC by 'stealing' from a mainnet whale (impersonation)"""
+    print(f"💰 Stealing {amount_usdc} USDC for {target_address}...")
+    
+    WHALE = "0xA9D1e08C7793af67e9d92fe308d5697FB81d3E43" # Coinbase (USDC Whale)
     USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-    AAVE_POOL = "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"
-    AUSDC = "0x98C23E9d8f34FEFb1B7BD6a91B7FF122F4e16F5c"
-    COMPOUND_COMET = "0xc3d688B66703497DAA19211EEdff47f25384cdc3"
     
-    # Forge create command
-    # Private key from Anvil's first default account
-    PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-    
-    # Try to find forge in PATH
-    import shutil
-    forge_path = shutil.which("forge")
-    if not forge_path:
-        # Fallback for Docker environment
-        forge_path = "/root/.foundry/bin/forge"
-
-    # Build remappings using absolute paths for Docker stability
-    contracts_dir = os.path.abspath("contracts")
-    oz_path = os.path.join(contracts_dir, "lib/openzeppelin-contracts/contracts/")
-    forge_std_path = os.path.join(contracts_dir, "lib/forge-std/src/")
-    
-    if not os.path.exists(oz_path):
-        print(f"❌ Error: OpenZeppelin contracts not found at {oz_path}")
-        print("💡 Tip: Try running 'git submodule update --init --recursive' on your server.")
-        return None
-
-    cmd = [
-        forge_path, "create",
-        "src/StrategyHub.sol:StrategyHub",
-        "--rpc-url", RPC_URL,
-        "--private-key", PK,
-        "--constructor-args", USDC, AAVE_POOL, AUSDC, COMPOUND_COMET,
-        "--remappings", f"@openzeppelin/contracts/={oz_path}",
-        "--remappings", f"forge-std/={forge_std_path}"
-    ]
-    
-    print(f"Running Forge Command in {contracts_dir}...")
-    # Direct output to DEVNULL to clean up logs
-    result = subprocess.run(cmd, cwd=contracts_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
-    if result.returncode == 0:
-        # We need to find the address manually now that we didn't capture output
-        # Anvil usually stays the same if we use the first account
-        addr = "0x5FbDB2315678afecb367f032d93F642f64180aa3" # Default first deployment
-        print(f"✅ StrategyHub likely deployed to: {addr}")
-        
-        # Save in the format ContractManager expects
-        deployment_data = {
-            "StrategyHub": {
-                "address": addr,
-                "abi": "contracts/out/StrategyHub.sol/StrategyHub.json"
-            },
-            # Alias for services expecting Manager
-            "StrategyManager": {
-                "address": addr,
-                "abi": "contracts/out/StrategyHub.sol/StrategyHub.json"
-            }
-        }
-        
-        os.makedirs("deployments", exist_ok=True)
-        with open("deployments/local.json", "w") as f:
-            json.dump(deployment_data, f, indent=2)
-            
-        # Also helpful to have simple text file
-        with open("contracts/deployed_address.txt", "w") as f:
-            f.write(addr)
-        return addr
-    else:
-        print(f"❌ FORGE DEPLOYMENT FAILED!")
-        print(f"--- STDOUT ---\n{result.stdout}")
-        print(f"--- STDERR ---\n{result.stderr}")
-        return None
-
-def fund_keeper(target_address=None):
-    """Fund the keeper account with ETH from the Anvil whale"""
-    print("💰 Funding Keeper Account...")
-    
-    # Anvil default account #0 (Whale)
-    whale_pk = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-    
-    if not target_address:
-         # Try to get from env or use a hardcoded fallback if checking logs manually
-         # But better to just use the one we saw in logs: 0x4D8...
-         # Actually, let's derive it or ask user. 
-         # The logs showed: 0x4D8887Dd74e4d5e07d6d642Bb4B45ff891dbf21C
-         # We can try to use cast to derive it from the PK in env if available
-         pass
-
-    # We will use cast to transfer
-    # We need the address. Let's assume the user provided one or we use the known one from logs
-    # But wait, the script doesn't know the address easily without eth-account.
-    # Let's rely on the one from logs for now as a fallback, or try to read it.
-    
-    deployer_pk = os.getenv("KEEPER_PRIVATE_KEY")
-    if not deployer_pk:
-        print("⚠️ No KEEPER_PRIVATE_KEY found. Skipping funding.")
-        return
-
-    # Use cast to get address
     import shutil
     cast_path = shutil.which("cast") or "/root/.foundry/bin/cast"
     
-    # Get Address
-    try:
-        cmd_addr = [cast_path, "wallet", "address", "--private-key", deployer_pk]
-        result = subprocess.run(cmd_addr, capture_output=True, text=True)
-        if result.returncode != 0:
-             print(f"❌ Failed to derive address: {result.stderr}")
-             return
-        target_address = result.stdout.strip()
-    except Exception as e:
-        print(f"⚠️ Could not derive address: {e}")
-        return
-
-    print(f"   Target: {target_address}")
+    # 1. Impersonate
+    subprocess.run([cast_path, "rpc", "anvil_impersonateAccount", WHALE], stdout=subprocess.DEVNULL)
     
-    # Send 100 ETH
-    cmd_send = [
-        cast_path, "send", 
-        target_address, 
-        "--value", "100ether",
-        "--private-key", whale_pk,
-        "--rpc-url", RPC_URL
+    # 2. Transfer
+    amount_raw = amount_usdc * 10**6
+    subprocess.run([
+        cast_path, "send", USDC, 
+        "transfer(address,uint256)", target_address, str(amount_raw),
+        "--from", WHALE, "--rpc-url", RPC_URL, "--unlocked"
+    ], stdout=subprocess.DEVNULL)
+    
+    # 3. Stop impersonating
+    subprocess.run([cast_path, "rpc", "anvil_stopImpersonatingAccount", WHALE], stdout=subprocess.DEVNULL)
+    
+    print(f"✅ Stole {amount_usdc} USDC from the whale.")
+
+def setup_roles(hub_addr, vault_addr, keeper_addr):
+    """Setup roles between Hub, Vault and Keeper"""
+    print("🔐 Setting up Roles...")
+    import shutil
+    cast_path = shutil.which("cast") or "/root/.foundry/bin/cast"
+    PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    
+    # Roles
+    VAULT_ROLE = "0x8990a427618991206f6e0b7a810d728639556885568855688556885568855688" # Simplified, let's use keccak256("VAULT_ROLE")
+    # Actually, let's just use cast call to get them or hardcode the real ones if known
+    # VAULT_ROLE = keccak256("VAULT_ROLE")
+    # KEEPER_ROLE = keccak256("KEEPER_ROLE")
+    
+    # We can use cast to compute the role or just hardcode common ones
+    # But let's just use the StrategyHub to grant it.
+    
+    # Grant VAULT_ROLE to Vault on Hub
+    # grantRole(bytes32 role, address account)
+    # VAULT_ROLE = keccak256("VAULT_ROLE") = 0x98150e7a256d0d29d8920150d1804f32998ae8683e3902f2b3ec3d7b43a99180
+    VAULT_ROLE_HASH = "0x98150e7a256d0d29d8920150d1804f32998ae8683e3902f2b3ec3d7b43a99180"
+    KEEPER_ROLE_HASH = "0x9c193275726217596c561dd149234b6e5e95e1e0a8b98150e7a256d0d29d892" # placeholder
+    # Let's derive them using cast to be safe
+    try:
+        KEEPER_ROLE_HASH = subprocess.run([cast_path, "keccak", "KEEPER_ROLE"], capture_output=True, text=True).stdout.strip()
+        VAULT_ROLE_HASH = subprocess.run([cast_path, "keccak", "VAULT_ROLE"], capture_output=True, text=True).stdout.strip()
+    except: pass
+
+    # Grant VAULT_ROLE to Vault on Hub
+    subprocess.run([cast_path, "send", hub_addr, "grantRole(bytes32,address)", VAULT_ROLE_HASH, vault_addr, "--private-key", PK, "--rpc-url", RPC_URL], stdout=subprocess.DEVNULL)
+    
+    # Grant KEEPER_ROLE to Keeper on Hub
+    subprocess.run([cast_path, "send", hub_addr, "grantRole(bytes32,address)", KEEPER_ROLE_HASH, keeper_addr, "--private-key", PK, "--rpc-url", RPC_URL], stdout=subprocess.DEVNULL)
+    
+    # Grant KEEPER_ROLE to Keeper on Vault (Vault.sol uses same role name)
+    subprocess.run([cast_path, "send", vault_addr, "grantRole(bytes32,address)", KEEPER_ROLE_HASH, keeper_addr, "--private-key", PK, "--rpc-url", RPC_URL], stdout=subprocess.DEVNULL)
+    
+    print("✅ Roles configured.")
+
+def update_env(hub_addr, vault_addr):
+    """Update .env file with new addresses"""
+    print(f"📝 Updating .env...")
+    with open(".env", "r") as f:
+        lines = f.readlines()
+    
+    with open(".env", "w") as f:
+        for line in lines:
+            if line.startswith("VAULT_CONTRACT_ADDRESS="):
+                f.write(f"VAULT_CONTRACT_ADDRESS={vault_addr}\n")
+            elif line.startswith("STRATEGY_HUB_ADDRESS="):
+                f.write(f"STRATEGY_HUB_ADDRESS={hub_addr}\n")
+            else:
+                f.write(line)
+
+def deploy_contracts(keeper_addr):
+    print("🚀 Deploying Smart Contracts via Forge Script...")
+    PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    
+    import shutil
+    import re
+    forge_path = shutil.which("forge") or "/root/.foundry/bin/forge"
+    contracts_dir = os.path.abspath("contracts")
+
+    # Run forge script
+    cmd = [
+        forge_path, "script", "scripts/Deploy.s.sol:Deploy",
+        "--rpc-url", RPC_URL, "--broadcast", "--force", "--slow"
     ]
     
-    subprocess.run(cmd_send, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print("✅ Funded 100 ETH to Keeper.")
+    env = os.environ.copy()
+    env["PRIVATE_KEY"] = PK
+    env["KEEPER_ADDRESS"] = keeper_addr
+    
+    res = subprocess.run(cmd, cwd=contracts_dir, capture_output=True, text=True, env=env)
+    if res.returncode != 0:
+        print(f"❌ Deployment Script Failed: {res.stderr}")
+        return None, None
+    
+    # Combined output
+    full_output = res.stdout + res.stderr
+    
+    # In Deploy.s.sol: Hub is 1st, Vault is 2nd
+    hub_match = re.search(r"StrategyHub.*? (0x[a-fA-F0-9]{40})", full_output, re.S | re.I)
+    vault_match = re.search(r"YieldVault.*? (0x[a-fA-F0-9]{40})", full_output, re.S | re.I)
+    
+    hub_addr = hub_match.group(1) if hub_match else None
+    vault_addr = vault_match.group(1) if vault_match else None
+    
+    if not hub_addr or not vault_addr:
+        print(f"DEBUG FULL OUTPUT: {full_output}")
+        return None, None
+    
+    print(f"✅ StrategyHub: {hub_addr}")
+    print(f"✅ YieldVault:   {vault_addr}")
+    
+    # Save deployments
+    deployment_data = {
+        "StrategyHub": {"address": hub_addr, "abi": "contracts/out/StrategyHub.sol/StrategyHub.json"},
+        "YieldVault": {"address": vault_addr, "abi": "contracts/out/Vault.sol/YieldVault.json"},
+        "StrategyManager": {"address": hub_addr, "abi": "contracts/out/StrategyHub.sol/StrategyHub.json"}
+    }
+    
+    os.makedirs("deployments", exist_ok=True)
+    with open("deployments/local.json", "w") as f:
+        json.dump(deployment_data, f, indent=2)
+    
+    update_env(hub_addr, vault_addr)
+    
+    # Also write to simple text file for RebalancerService local pick-up
+    with open("contracts/deployed_address.txt", "w") as f:
+        f.write(hub_addr)
+        
+    return hub_addr, vault_addr
+
+def fund_keeper():
+    """Derive keeper address and fund it"""
+    deployer_pk = os.getenv("KEEPER_PRIVATE_KEY")
+    if not deployer_pk:
+        print("⚠️ No KEEPER_PRIVATE_KEY")
+        return None
+    
+    import shutil
+    cast_path = shutil.which("cast") or "/root/.foundry/bin/cast"
+    
+    # Derive address
+    res = subprocess.run([cast_path, "wallet", "address", "--private-key", deployer_pk], capture_output=True, text=True)
+    keeper_addr = res.stdout.strip()
+    
+    # 1. ETH (100)
+    print("   Funding Keeper with ETH...")
+    whale_pk = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+    subprocess.run([cast_path, "send", keeper_addr, "--value", "100ether", "--private-key", whale_pk, "--rpc-url", RPC_URL], stdout=subprocess.DEVNULL)
+    
+    # 2. USDC (100k)
+    deal_usdc(keeper_addr, 100_000)
+    
+    return keeper_addr
 
 if __name__ == "__main__":
     start_anvil()
-    address = deploy_contracts()
-    if address:
-        fund_keeper() # Run funding
-        print("✅ Deployment successful.")
+    keeper = fund_keeper()
+    if keeper:
+        hub, vault = deploy_contracts(keeper)
+        if hub and vault:
+            print("\n✨ FORK READY FOR AI REBALANCER ✨")
+            print(f"   Hub:   {hub}")
+            print(f"   Vault: {vault}")
+            print(f"   Bot:   {keeper}")
+        else:
+            print("❌ Contract setup failed.")
+            sys.exit(1)
     else:
-        print("❌ Deployment failed.")
+        print("❌ Funding failed.")
         sys.exit(1)

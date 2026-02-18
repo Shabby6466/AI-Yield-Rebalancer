@@ -56,11 +56,14 @@ graph LR
 ```
 *   **Confidence Reasoning**: DeFiLlama is the industry standard for yield data. TimescaleDB ensures data persistence even under heavy loads.
 
-### 2. Layer 2: The "Brain" (AI Inference)
+### 2. Layer 2: The "Brain" (AI Inference & Risk Scoring)
+*   **Models**:
+    -   **LSTM Predictor**: Forecasts 7-day ahead APY using 30-day historical sequences. Trained on `yield_snapshots`.
+    -   **XGBoost Risk Scorer**: Classifies protocol risk (0=Low, 1=Medium, 2=High) based on 45 security and economic features.
 *   **Processing**:
-    1.  **State Extraction**: The system takes 32 features per pool (Normalized APY, Log-TVL, Risk Score, Gas Prices, etc.).
-    2.  **PPO Inference**: The trained Reinforcement Learning agent (Proximal Policy Optimization) evaluates the state.
-    3.  **Reward Function**: Unlike simple "best APY" logic, the brain optimizes for `Yield - Gas - Risk`. It learned that rebalancing for 0.5% gain while paying $100 in gas is a losing move.
+    1.  **State Extraction**: The system takes 19-25 features per pool (Normalized APY, Log-TVL, Risk Score, Gas Prices, etc.).
+    2.  **Inference**: The brain evaluates candidates to find the "Dominant" pool that justifies rebalancing costs.
+    3.  **Profitability Gatekeeper**: Rebalances are only triggered if `(Yield Gain * 7 Days) > (Gas + Slippage)`.
 *   **Confidence Reasoning**: RL is excellent for complex optimization but requires massive historical data for "Elite" performance. The current prototype is solid but gains confidence as it sees more real-world market cycles.
 
 ### 3. Layer 3: The "Safety" (Risk Guard)
@@ -155,11 +158,25 @@ Since the local fork is a snapshot, it can become "stale" over time. To update y
     ```bash
     python scripts/refresh_fork.py
     ```
-2.  **What it does**:
-    *   Terminates the existing stale Anvil process.
-    *   Starts a new fork at the **latest** Mainnet block height.
-    *   Automatically redeploys the `StrategyHub.sol` contract to the new fork.
-    *   Updates the `deployed_address.txt` for the dashboard and rebalancer to use.
+
+---
+
+## 🧪 Optimized Mainnet Fork Testing
+The system includes a high-performance forking environment controlled via `scripts/start_local_fork.py`. This is the recommended way to test the AI rebalancer.
+
+### Key Logic
+1.  **Capital Injection (Whale Stealing)**: Automatically impersonates a top USDC whale (Coinbase) on the fork to transfer **100,000 USDC** to your Keeper's address. 
+2.  **Atomic Deployment**: Uses Forge Scripts (`Deploy.s.sol`) to deploy `StrategyHub` and `YieldVault` in a single operation, including automatic role configuration (`VAULT_ROLE`, `KEEPER_ROLE`).
+3.  **Persistence**: Automatically updates your `.env` and `deployments/local.json` with the new addresses.
+
+### How to Run
+```bash
+# Terminal 1: Start the optimized fork
+python scripts/start_local_fork.py
+
+# Terminal 2: Verify capital
+cast erc20 balance 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 $KEEPER_ADDRESS
+```
 
 ---
 
@@ -317,7 +334,14 @@ pip install -r requirements.txt
 git submodule update --init --recursive
 # 4. Set Python Path
 export PYTHONPATH=$PWD
-# 5. Deploy Contracts
+
+# 5. Backfill History (Last 60 Days)
+python3 scripts/backfill_history.py
+
+# 6. Train Models (LSTM & XGBoost)
+PYTHONPATH=. ./venv/bin/python scripts/train_all_models.py
+
+# 7. Deploy Contracts
 # This script usually starts anvil, but since we ran it in Terminal 2, 
 # it will detect it and proceed to deploy contracts immediately.
 python3 scripts/start_local_fork.py

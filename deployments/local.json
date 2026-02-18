@@ -1,10 +1,14 @@
 {
   "StrategyHub": {
-    "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "address": "0x09be87b1E6D1d3B9f11Bf0983320F9f05CD7bFE1",
     "abi": "contracts/out/StrategyHub.sol/StrategyHub.json"
   },
+  "YieldVault": {
+    "address": "0x026167dad7330b65D4b65beA103c45AAAf28Fc34",
+    "abi": "contracts/out/Vault.sol/YieldVault.json"
+  },
   "StrategyManager": {
-    "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "address": "0x09be87b1E6D1d3B9f11Bf0983320F9f05CD7bFE1",
     "abi": "contracts/out/StrategyHub.sol/StrategyHub.json"
   }
 }

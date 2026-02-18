@@ -113,9 +113,10 @@ class GraphClient:
             }
         }
         """
-        return await self.query(
+        result = await self.query(
             "aave", query, {"skip": skip, "first": first}
         )
+        return result.get("reserves", [])
 
     async def get_aave_protocol_data(self) -> Dict:
         """Get overall Aave protocol metrics"""
@@ -185,9 +186,10 @@ class GraphClient:
             }
         }
         """
-        return await self.query(
+        result = await self.query(
             "uniswap", query, {"skip": skip, "first": first}
         )
+        return result.get("pools", [])
 
     async def get_uniswap_token_data(self, token_id: str) -> Dict:
         """Get data for a specific token on Uniswap V3"""
@@ -296,9 +298,10 @@ class GraphClient:
             }
         }
         """
-        return await self.query(
+        result = await self.query(
             "curve", query, {"skip": skip, "first": first}
         )
+        return result.get("liquidityPools", [])
 
     async def get_curve_pool_detail(self, pool_id: str) -> Dict:
         """Get detailed data for a specific Curve pool"""

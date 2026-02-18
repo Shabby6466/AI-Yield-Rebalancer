@@ -1,6 +1,9 @@
 import logging
 import requests
 import os
+import random
+import asyncio
+from typing import Dict, Tuple
 from dotenv import load_dotenv
 from web3 import Web3
 
@@ -8,129 +11,171 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 class GasOptimizer:
-    def __init__(self, risk_multiplier: float = 10.0):
+    def __init__(self, risk_multiplier: float = 3.0):
+        # Reduced from 10.0 to 3.0 to be more realistic for active rebalancing
         self.risk_multiplier = risk_multiplier
         self.etherscan_key = os.getenv("ETHERSCAN_API_KEY")
         
         # Multi-Chain RPCs
-        self.w3_eth = Web3(Web3.HTTPProvider("https://cloudflare-eth.com"))
-        self.w3_base = Web3(Web3.HTTPProvider("https://mainnet.base.org"))
+        # Use these or get a free API key from Alchemy/Infura for 100% reliability
+        self.w3_eth = Web3(Web3.HTTPProvider("https://eth.drpc.org")) # dRPC is often more stable
+        self.w3_base = Web3(Web3.HTTPProvider("https://base.meowrpc.com")) # Alternative Base RPC
         
-        # Gas Limits (Updated for complex DeFi interactions)
+        # Gas Limits (L2 execution only)
         self.limits = {
             "transfer": 65000,
-            "swap": 550000, # Adjusted for nested StrategyHub logic
-            "bridge": 250000
+            "swap": 350000,
+            "bridge": 200000
         }
 
-    def get_eth_price(self):
-        """Fetch live ETH price (USD)"""
+    def get_eth_price(self) -> float:
+        """Fetch live ETH price with fallback"""
         try:
-            # Try Etherscan first
-            if self.etherscan_key:
-                url = f"https://api.etherscan.io/api?module=stats&action=ethprice&apikey={self.etherscan_key}"
-                resp = requests.get(url, timeout=3).json()
-                if resp['status'] == '1':
-                    return float(resp['result']['ethusd'])
-            
-            # Fallback to CryptoCompare
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            resp = requests.get("https://min-api.cryptocompare.com/data/price?fsym=ETH&tsyms=USD", headers=headers, timeout=3)
-            return float(resp.json().get("USD", 3000.0))
+            url = f"https://api.etherscan.io/api?module=stats&action=ethprice&apikey={self.etherscan_key}"
+            resp = requests.get(url, timeout=5).json()
+            if resp.get('status') == '1':
+                return float(resp['result']['ethusd'])
+            return 3000.0 # Standard fallback
         except Exception as e:
             logger.warning(f"Price fetch failed: {e}")
             return 3000.0
 
-    def get_real_gas_cost(self, chain: str, action: str, eth_price: float) -> float:
-        """Calculate USD cost for a specific action on a specific chain"""
-        try:
-            w3 = self.w3_eth if chain == "ethereum" else self.w3_base
-            gas_price_wei = w3.eth.gas_price
-            
-            # Cost = (Limit * Price_in_Wei) / 1e18 * ETH_Price
-            cost_usd = (self.limits.get(action, 200000) * gas_price_wei) / 1e18 * eth_price
-            
-            # Add organic jitter (±2%)
-            import random
-            return cost_usd * random.uniform(0.98, 1.02)
-        except Exception as e:
-            logger.error(f"Gas fetch failed for {chain}: {e}")
-            # Fallback with jitter (±10%)
-            import random
-            base = 1.0 if chain == "ethereum" else 0.5
-            return base * random.uniform(0.9, 1.1)
+    def get_l1_data_fee(self, eth_gas_price_wei: int) -> float:
+        """
+        Calculates the L1 Data Fee for Base (OP Stack).
+        L1 Fee = (CalldataSize * L1GasPrice * Scalar)
+        Approximated for a standard DeFi transaction (~300 bytes).
+        """
+        # Base uses a scalar (approx 0.6) and L1 gas price
+        l1_scalar = 0.684
+        tx_data_size = 300 # bytes for a typical swap calldata
+        l1_fee_wei = int(tx_data_size * eth_gas_price_wei * l1_scalar)
+        return l1_fee_wei / 1e18
 
-    def calculate_swap_fee(self, amount_usd: float, pool_tvl: float = 0.0, is_stable_pair: bool = True) -> float:
+    def get_real_gas_cost(self, chain: str, action: str, eth_price: float) -> float:
+        """Optimized calculation including L1 Data Fees for L2s"""
+        try:
+            eth_gas_price = self.w3_eth.eth.gas_price
+            
+            if chain == "base":
+                l2_gas_price = self.w3_base.eth.gas_price
+                l2_execution = (self.limits.get(action, 200000) * l2_gas_price) / 1e18
+                l1_data_cost = self.get_l1_data_fee(eth_gas_price)
+                total_wei = l2_execution + l1_data_cost
+            else:
+                total_wei = (self.limits.get(action, 210000) * eth_gas_price) / 1e18
+                
+            return total_wei * eth_price * random.uniform(0.98, 1.05)
+        except Exception as e:
+            logger.error(f"Gas fetch failed: {e}")
+            return 5.0 if chain == "ethereum" else 0.50
+
+    def calculate_swap_fee(self, amount_usd: float, pool_tvl: float, is_stable: bool) -> float:
         """
-        Estimate DEX Swap Fee with Liquidity Penalty (Depth-Aware)
-        - Stable-Stable (Curve/Uni v3 0.05%): 0.0005
-        - Volatile (Uni v3 0.3%): 0.003
+        Optimized Concentrated Liquidity Slippage Estimation.
+        Uni V3 Stablecoin pools (0.01% tier) have significantly higher depth.
         """
-        fee_rate = 0.0005 if is_stable_pair else 0.003
+        # Base fee (0.01% for stabl-stabl, 0.3% for volatile)
+        fee_rate = 0.0001 if is_stable else 0.003
         base_fee = amount_usd * fee_rate
 
-        # --- NEW: Depth-Aware Slippage (Slippage increases with trade size/depth ratio) ---
-        if pool_tvl > 1.0: # Safeguard against div by zero
-            # Penalty increases exponentially as your trade size approaches the pool depth
-            slippage_impact = (amount_usd / pool_tvl) ** 2 
-            total_friction = base_fee + (amount_usd * slippage_impact)
-            return total_friction
-            
-        return base_fee
+        # Concentrated Liquidity Slippage Model
+        # Stablecoin liquidity is ~25x more concentrated at the $1 peg
+        concentration_factor = 25.0 if is_stable else 1.0
+        # Slippage = (Trade / Effective_Liquidity)
+        slippage = amount_usd / (pool_tvl * concentration_factor)
+        
+        return base_fee + (amount_usd * slippage)
 
     def should_rebalance(self, 
                         current_apy: float, 
                         new_apy: float, 
                         capital_usd: float,
-                        is_stable_pair: bool = True) -> tuple[bool, float, dict]:
-        """
-        Decide based on Total Migration Cost (Gas + Swap Fees)
-        """
+                        pool_tvl: float,
+                        is_stable: bool = True) -> Tuple[bool, float, Dict]:
+        """Final decision engine with refined ROI calculation"""
         eth_price = self.get_eth_price()
         
-        # 1. Gas Costs (Exit -> Bridge -> Enter)
+        # 1. Chain Migration Costs
         cost_exit = self.get_real_gas_cost("ethereum", "swap", eth_price)
         cost_bridge = self.get_real_gas_cost("ethereum", "bridge", eth_price)
         cost_enter = self.get_real_gas_cost("base", "swap", eth_price)
         total_gas = cost_exit + cost_bridge + cost_enter
         
-        # 2. Swap Fees (The invisible killer)
-        # We pay swap fees TWICE if we exit to stable then enter new position? 
-        # Usually: Exit (LP -> Stable) [Fee] -> Bridge -> Enter (Stable -> LP) [Fee]
-        # Let's assume 2 swaps for full migration
-        swap_fee_exit = self.calculate_swap_fee(capital_usd, is_stable_pair)
-        swap_fee_enter = self.calculate_swap_fee(capital_usd, is_stable_pair)
-        total_swap_fee = swap_fee_exit + swap_fee_enter
-        
-        # 3. Total Migration Cost
+        # 2. DEX Friction
+        total_swap_fee = self.calculate_swap_fee(capital_usd, pool_tvl, is_stable) * 2
         total_cost = total_gas + total_swap_fee
         
-        # Profitability Check (Annualized -> Monthly)
-        apy_diff = new_apy - current_apy
-        if apy_diff <= 0:
-            return False, 0.0, {}
-            
-        annual_profit = capital_usd * apy_diff
-        monthly_profit = annual_profit / 12
+        # 3. Monthly ROI Check
+        apy_diff = (new_apy - current_apy)
+        if apy_diff <= 0.005: # Minimum 0.5% gain required to even consider rebalancing
+            return False, total_cost, {"reason": "Yield spread too thin"}
+
+        monthly_gain = (capital_usd * apy_diff) / 12
         
-        # Strict Check: Monthly profit must cover migration cost * Multiplier
-        is_profitable = monthly_profit > (total_cost * self.risk_multiplier)
+        # Hurdle: Monthly gain must cover (Total Cost * Risk Multiplier)
+        is_profitable = monthly_gain > (total_cost * self.risk_multiplier)
         
         breakdown = {
-            "gas_exit": cost_exit,
-            "gas_bridge": cost_bridge,
-            "gas_enter": cost_enter,
+            "total_gas": total_gas,
             "swap_fees": total_swap_fee,
-            "total": total_cost,
-            "monthly_gain": monthly_profit
+            "total_cost": total_cost,
+            "monthly_gain": monthly_gain,
+            "roi_days": (total_cost / (monthly_gain / 30)) if monthly_gain > 0 else 999
         }
         
-        logger.info(f"💰 Cost Benefit Analysis (Capital: ${capital_usd:,.0f}):")
-        logger.info(f"   Gas (ETH+Base): ${total_gas:.2f}")
-        logger.info(f"   Swap Fees (x2): ${total_swap_fee:.2f} ({(total_swap_fee/capital_usd)*100:.2f}%)")
-        logger.info(f"   ---------------------------")
-        logger.info(f"   Total Cost:     ${total_cost:.2f}")
-        logger.info(f"   Monthly Gain:   ${monthly_profit:.2f}")
-        logger.info(f"   ROI Period:     {total_cost/(monthly_profit/30):.1f} days")
-        
         return is_profitable, total_cost, breakdown
+    
+if __name__ == "__main__":
+    import asyncio
+
+    async def run_diagnostic_test():
+        # 1. Initialize Optimizer
+        # risk_multiplier=3 means monthly profit must be 3x the migration cost
+        optimizer = GasOptimizer(risk_multiplier=3.0)
+        
+        print("--- 🛠️ GAS OPTIMIZER DIAGNOSTIC START ---")
+        
+        # 2. Fetch Market Data
+        eth_price = optimizer.get_eth_price()
+        print(f"[MARKET] Current ETH Price: ${eth_price:,.2f}")
+        
+        # 3. Simulate a Rebalance Scenario
+        # Scenario: Moving $100k from 5% APY (Current) to 12% APY (Target)
+        capital = 500.0
+        current_yield = 0.05
+        target_yield = 0.12
+        pool_liquidity = 5000000.0 # $5M TVL in the target pool
+        
+        print(f"[SCENARIO] Capital: ${capital:,.0f}")
+        print(f"[SCENARIO] Yield Shift: {current_yield*100}% -> {target_yield*100}%")
+        
+        # 4. Run Optimization Logic
+        is_profitable, total_cost, data = optimizer.should_rebalance(
+            current_apy=current_yield,
+            new_apy=target_yield,
+            capital_usd=capital,
+            pool_tvl=pool_liquidity,
+            is_stable=True
+        )
+        
+        # 5. Output Detailed Results
+        print("\n--- 📊 BREAKDOWN ---")
+        print(f"Total Migration Cost:   ${data['total_cost']:.2f}")
+        print(f"  └─ Gas (Est.):        ${data['total_gas']:.2f}")
+        print(f"  └─ Swap Fees:         ${data['swap_fees']:.2f}")
+        print(f"Projected Monthly Gain: ${data['monthly_gain']:.2f}")
+        print(f"Payback Period (ROI):   {data['roi_days']:.1f} days")
+        
+        print("\n--- 🤖 AI DECISION ---")
+        if is_profitable:
+            print(f"✅ STATUS: REBALANCE RECOMMENDED")
+            print(f"REASON: Monthly gain is {data['monthly_gain']/data['total_cost']:.1f}x the migration cost.")
+        else:
+            print(f"❌ STATUS: HOLD POSITION")
+            print(f"REASON: {data.get('reason', 'Migration cost too high relative to gains.')}")
+            
+        print("\n--- 🛠️ DIAGNOSTIC COMPLETE ---")
+
+    # Run the test
+    asyncio.run(run_diagnostic_test())    

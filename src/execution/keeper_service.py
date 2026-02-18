@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 # Import ML service
 from ml_prediction_service import MLPredictionService
 from contract_manager import ContractManager
+from roi_calculator import ROICalculator
 
 load_dotenv()
 logging.basicConfig(
@@ -45,6 +46,7 @@ class KeeperService:
         self.interval_minutes = interval_minutes
         self.ml_service = MLPredictionService(network)
         self.contract_manager = ContractManager(network)
+        self.roi_calculator = ROICalculator()
         
         # Load pool configuration
         self.pools = self._load_pool_config()
@@ -195,6 +197,17 @@ class KeeperService:
         try:
             vault = self.contract_manager.contracts.get('YieldVault')
             
+            # Get current portfolio value before rebalance
+            current_allocations = {addr: 0 for addr in pool_addresses}
+            entry_portfolio_value = 0
+            try:
+                # Get vault balance from contract
+                vault_balance = vault.functions.totalAssets().call()
+                entry_portfolio_value = vault_balance / 1e6  # Convert from smallest unit
+            except:
+                logger.warning("Could not fetch vault balance")
+                entry_portfolio_value = 100000  # Default estimate
+            
             # Prepare transaction data
             allocation_array = [allocations.get(addr, 0) for addr in pool_addresses]
             
@@ -218,8 +231,9 @@ class KeeperService:
             # Sign and send
             signed_tx = self.contract_manager.account.sign_transaction(tx)
             tx_hash = self.contract_manager.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+            tx_hash_hex = tx_hash.hex()
             
-            logger.info(f"\nRebalance transaction sent: {tx_hash.hex()}")
+            logger.info(f"\nRebalance transaction sent: {tx_hash_hex}")
             logger.info("Waiting for confirmation...")
             
             # Wait for confirmation
@@ -227,12 +241,37 @@ class KeeperService:
             
             if receipt['status'] == 1:
                 gas_used = receipt['gasUsed']
-                gas_cost = gas_used * tx['gasPrice'] / 1e18
+                gas_price_gwei = tx['gasPrice'] / 1e9
+                gas_cost_eth = gas_used * tx['gasPrice'] / 1e18
+                
+                # Estimate gas cost in USD (assuming $2000/ETH as default)
+                eth_price_usd = float(os.getenv('ETH_PRICE_USD', '2000'))
+                gas_cost_usd = gas_cost_eth * eth_price_usd
                 
                 logger.info(f"\n✅ Rebalancing successful!")
                 logger.info(f"Gas used: {gas_used:,}")
-                logger.info(f"Gas cost: {gas_cost:.6f} ETH")
-                logger.info(f"Transaction: https://{self.network}.etherscan.io/tx/{tx_hash.hex()}")
+                logger.info(f"Gas cost: {gas_cost_usd:.2f} USD")
+                logger.info(f"Transaction: https://{self.network}.etherscan.io/tx/{tx_hash_hex}")
+                
+                # Record ROI entry point
+                allocation_from = {addr: current_allocations[addr] for addr in pool_addresses}
+                allocation_to = {addr: allocations[addr] for addr in pool_addresses}
+                
+                roi_id = self.roi_calculator.record_rebalance_entry(
+                    rebalance_id=0,  # We don't have a rebalance_proposals ID in this flow
+                    tx_hash=tx_hash_hex,
+                    entry_portfolio_value_usd=entry_portfolio_value,
+                    allocation_from=allocation_from,
+                    allocation_to=allocation_to,
+                    gas_cost_usd=gas_cost_usd,
+                    slippage_percent=0.1  # Estimated slippage
+                )
+                
+                if roi_id > 0:
+                    logger.info(f"✅ ROI tracking started: ID {roi_id}")
+                else:
+                    logger.warning("Failed to record ROI entry")
+                
                 return True
             else:
                 logger.error("❌ Rebalancing transaction failed")
