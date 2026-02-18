@@ -612,20 +612,29 @@ class RebalancerService:
     def _construct_rebalance_txs(self, target_pool_id: str, new_aave_bps: int, new_comp_bps: int) -> List[Dict]:
         """Calculates transaction data for StrategyHub.rebalance(aaveBps, compBps)."""
         logger.info("Constructing rebalancing transactions for StrategyHub...")
-        # In this POC, StrategyHub handles Aave and Compound. 
+        # In this POC, StrategyHub handles Aave and Compound.
         # The BPS values specify the desired allocation.
-        
-        # Encoding calldata for StrategyHub.rebalance(uint256 aaveBps, uint256 compoundBps)
-        # Function selector for rebalance(uint256,uint256) is 0x56a427f1
-        method_id = "0x56a427f1"
-        
-        # Ensure BPS are within range
+
+        # Ensure BPS are within range and sum to 10000
         safe_aave = max(0, min(10000, new_aave_bps))
         safe_comp = max(0, min(10000, new_comp_bps))
-        
-        aave_hex = format(safe_aave, '064x')
-        comp_hex = format(safe_comp, '064x')
-        calldata = method_id + aave_hex + comp_hex
+
+        # Use proper ABI encoding — never hardcode selectors
+        HUB_REBALANCE_ABI = [{
+            "name": "rebalance",
+            "type": "function",
+            "inputs": [
+                {"name": "newAaveBps", "type": "uint256"},
+                {"name": "newCompoundBps", "type": "uint256"}
+            ],
+            "outputs": []
+        }]
+        hub_contract = self.w3.eth.contract(
+            address=self.hub_address,
+            abi=HUB_REBALANCE_ABI
+        )
+        calldata = hub_contract.encodeABI(fn_name="rebalance", args=[safe_aave, safe_comp])
+        logger.info(f"   - Encoded StrategyHub.rebalance({safe_aave}, {safe_comp})")
 
         rebalance_tx = {
             'from': self.signer.address,
