@@ -65,7 +65,6 @@ services:
       - ./data:/app/data
       - ./contracts:/app/contracts
       - ./models:/app/models
-      - ./models:/app/models
     command: >
       bash -c "
         export PYTHONPATH=/app &&
