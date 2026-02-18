@@ -301,7 +301,7 @@ class RebalancerService:
             try:
                 txs = self._construct_rebalance_txs("", target_aave_bps, target_comp_bps)
                 for tx in txs:
-                   res = await self.hands.send_bundle([tx])
+                   res = await asyncio.to_thread(self.hands.relay_with_retry, [tx])
                    if res:
                         logger.info(f"🚀 REBALANCE SUCCESSFUL: Moved funds to {top_allocation.symbol}")
                         self.last_rebalance_time = datetime.utcnow()
