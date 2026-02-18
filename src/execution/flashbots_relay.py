@@ -39,7 +39,9 @@ class FlashbotsRelayer:
         """Send a single transaction directly (for local/test networks)."""
         try:
             signed = self.signer.sign_transaction(tx)
-            tx_hash = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+            # web3.py v6+ uses raw_transaction, v5 uses rawTransaction
+            raw = getattr(signed, 'raw_transaction', None) or getattr(signed, 'rawTransaction', None)
+            tx_hash = self.w3.eth.send_raw_transaction(raw)
             receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
             if receipt['status'] == 1:
                 logger.info(f"✅ Direct tx confirmed: {tx_hash.hex()} (block {receipt['blockNumber']})")
