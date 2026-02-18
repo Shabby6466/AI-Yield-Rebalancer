@@ -96,6 +96,12 @@ services:
       - ETHEREUM_RPC_URL=http://anvil:8545
       - BASE_RPC_URL=http://anvil:8545
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY}
+      - KEEPER_PRIVATE_KEY=${KEEPER_PRIVATE_KEY}
+      - DEPLOYER_PRIVATE_KEY=${KEEPER_PRIVATE_KEY}
+      - STRATEGY_HUB_ADDRESS=${STRATEGY_HUB_ADDRESS:-}
+      - DUNE_API_KEY=${DUNE_API_KEY}
+      - REBALANCE_INTERVAL=300
+      - VAULT_CONTRACT_ADDRESS=${VAULT_CONTRACT_ADDRESS}
     volumes:
       - ./data:/app/data
       - ./contracts:/app/contracts
