@@ -709,26 +709,54 @@ async def get_vault_assets():
     hub_address = clients.get('hub_address')
     w3 = clients.get('w3')
     
+    # Also get Vault Address for direct check
+    vault_address = os.getenv("VAULT_CONTRACT_ADDRESS")
+    if not vault_address and os.path.exists(".env"):
+         # Try to load from .env if not in env vars
+         try:
+             with open(".env") as f:
+                 for line in f:
+                     if "VAULT_CONTRACT_ADDRESS" in line:
+                         vault_address = line.strip().split("=")[1]
+         except: pass
+
     if not hub_address or not w3:
         raise HTTPException(status_code=503, detail="Vault connection not initialized")
         
     try:
-        # Create contract instance
-        hub = w3.eth.contract(address=hub_address, abi=clients['hub_abi'])
+        logger.info(f"🔍 Checking Assets | Hub: {hub_address} | Vault: {vault_address}")
         
-        # getBalances() returns: (aaveBalance, compoundBalance, idleBalance, total)
-        # All balances are in USDC (6 decimals)
+        # 1. Hub Balances
+        hub = w3.eth.contract(address=hub_address, abi=clients['hub_abi'])
         balances = await asyncio.to_thread(hub.functions.getBalances().call)
         
-        # Convert from 6 decimals to float
         aave_usd = float(balances[0]) / 1e6
         comp_usd = float(balances[1]) / 1e6
         idle_usd = float(balances[2]) / 1e6
         total_usd = float(balances[3]) / 1e6
         
+        # 2. Fallback/Direct Vault Check if Hub reports 0 but we have a Vault address
+        vault_direct = 0.0
+        if total_usd == 0 and vault_address:
+            try:
+                # USDC Address (Mainnet/Anvil)
+                USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+                abi = [{"constant":True,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]
+                usdc_contract = w3.eth.contract(address=USDC, abi=abi)
+                raw_bal = await asyncio.to_thread(usdc_contract.functions.balanceOf(vault_address).call)
+                vault_direct = float(raw_bal) / 1e6
+                
+                if vault_direct > 0:
+                    logger.info(f"⚠️ Hub reports 0, but Vault has ${vault_direct} USDC directly.")
+                    idle_usd = vault_direct # Assume it's idle if in Vault
+                    total_usd = vault_direct
+            except Exception as e:
+                logger.warning(f"Failed direct vault check: {e}")
+
         return {
             "status": "success",
             "hub_address": hub_address,
+            "vault_address": vault_address,
             "assets": {
                 "Aave V3": aave_usd,
                 "Compound V3": comp_usd,
@@ -739,7 +767,13 @@ async def get_vault_assets():
         }
     except Exception as e:
         logger.error(f"Failed to fetch vault assets: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Try to return partial data if possible or at least the address being used
+        return {
+             "status": "error",
+             "error": str(e),
+             "hub_used": hub_address,
+             "vault_used": vault_address
+        }
 
 @app.post("/admin/rebalance")
 async def execute_rebalance(
