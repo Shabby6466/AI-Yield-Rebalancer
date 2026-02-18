@@ -395,3 +395,28 @@ INSERT INTO protocols (name, symbol, address, protocol_type) VALUES
     ('Curve Finance', 'CRV', '0xD51a44d3FDF375bD38e886bdD2629d1b78b88D3B', 'amm'),
     ('Uniswap V3', 'UNI', '0xE592427A0AEce92De3Edee1F18E0157C05861564', 'dex')
 ON CONFLICT (name) DO NOTHING;
+
+-- ============================================================================
+-- ML Data Ingestion Tables (Synced from TimeseriesDB logic)
+-- ============================================================================
+
+-- Raw yield data for ML Training (Compatible with yield_snapshots in TimeseriesDB)
+CREATE TABLE IF NOT EXISTS yield_snapshots (
+    id SERIAL PRIMARY KEY,
+    time TIMESTAMP NOT NULL,
+    pool_id VARCHAR(100) NOT NULL,
+    protocol VARCHAR(100),
+    symbol VARCHAR(50),
+    apy_total FLOAT,
+    apy_base FLOAT,
+    apy_reward FLOAT,
+    tvl_usd FLOAT,
+    il_risk VARCHAR(50),
+    is_outlier BOOLEAN DEFAULT FALSE,
+    chain VARCHAR(50) DEFAULT 'ethereum',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(pool_id, time)
+);
+
+CREATE INDEX IF NOT EXISTS idx_yield_snapshots_time ON yield_snapshots (time DESC);
+CREATE INDEX IF NOT EXISTS idx_yield_snapshots_pool ON yield_snapshots (pool_id, time DESC);
