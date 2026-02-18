@@ -121,20 +121,56 @@ def setup_roles(hub_addr, vault_addr, keeper_addr):
 def update_env(hub_addr, vault_addr):
     """Update .env file with new addresses"""
     print(f"📝 Updating .env...")
+    
+    # 1. Define all keys we want to ensure exist in .env
+    required_keys = [
+        "DATABASE_URL",
+        "RPC_URL",
+        "ETHEREUM_RPC_URL",
+        "BASE_RPC_URL",
+        "NETWORK",
+        "ALCHEMY_API_KEY",
+        "KEEPER_PRIVATE_KEY",
+        "DEPLOYER_PRIVATE_KEY",
+        "DUNE_API_KEY",
+        "REBALANCE_INTERVAL",
+        "VAULT_CONTRACT_ADDRESS",
+        "STRATEGY_HUB_ADDRESS"
+    ]
+    
+    # 2. Read existing .env (or create empty)
+    env_map = {}
     try:
         with open(".env", "r") as f:
-            lines = f.readlines()
-        
-        with open(".env", "w") as f:
-            for line in lines:
-                if line.startswith("VAULT_CONTRACT_ADDRESS="):
-                    f.write(f"VAULT_CONTRACT_ADDRESS={vault_addr}\n")
-                elif line.startswith("STRATEGY_HUB_ADDRESS="):
-                    f.write(f"STRATEGY_HUB_ADDRESS={hub_addr}\n")
-                else:
-                    f.write(line)
+            for line in f:
+                if "=" in line:
+                    k, v = line.strip().split("=", 1)
+                    env_map[k] = v
     except FileNotFoundError:
-        print("⚠️ .env file not found. Skipping .env update (Expected in Docker).")
+        print("⚠️ .env file not found. Creating new one.")
+
+    # 3. Update with new contract addresses
+    env_map["VAULT_CONTRACT_ADDRESS"] = vault_addr
+    env_map["STRATEGY_HUB_ADDRESS"] = hub_addr
+    
+    # 4. Fill in other missing keys from current process Environment (passed by Docker)
+    for key in required_keys:
+        if key not in env_map:
+            val = os.getenv(key)
+            if val:
+                env_map[key] = val
+            else:
+                # Set sensible defaults for local dev if missing
+                if key == "NETWORK": env_map[key] = "local"
+                if key == "RPC_URL": env_map[key] = "http://anvil:8545"
+                if key == "ETHEREUM_RPC_URL": env_map[key] = "http://anvil:8545"
+                if key == "BASE_RPC_URL": env_map[key] = "http://anvil:8545"
+    
+    # 5. Write back to file
+    try:
+        with open(".env", "w") as f:
+            for k, v in env_map.items():
+                f.write(f"{k}={v}\n")
     except Exception as e:
         print(f"⚠️ Failed to update .env: {e}")
 
