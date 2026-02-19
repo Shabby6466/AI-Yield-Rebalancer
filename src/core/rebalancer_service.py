@@ -56,7 +56,7 @@ class RebalancerService:
     """
     
     def __init__(self):
-        load_dotenv()
+        load_dotenv(override=True)
         # Add a strict request timeout to prevent hanging on slow RPCs
         self.w3 = Web3(Web3.HTTPProvider(
             os.getenv("RPC_URL"),
@@ -68,31 +68,30 @@ class RebalancerService:
         # Detect Network (Priority: Env -> File -> Default)
         network = os.getenv("NETWORK", "ethereum")
         self.usdc_address = os.getenv("USDC_ADDRESS", "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
-        self.erc20_abi = [
-            {"constant": True, "inputs": [{"name": "_owner", "type": "address"}], "name": "balanceOf", "outputs": [{"name": "balance", "type": "uint256"}], "type": "function"},
-            {"constant": True, "inputs": [], "name": "decimals", "outputs": [{"name": "", "type": "uint8"}], "type": "function"}
-        ]
         
         if os.path.exists("contracts/deployed_address.txt"):
             network = "local"
             logger.info("Found local deployment file. Switching to NETWORK=local")
         
         self.network = network
-            
+
         self.ml_service = MLPredictionService(network=network)
         self.chainlink = ChainlinkClient(self.w3)
         
         # Initialize Layers
         
-        # Resolve StrategyHub Address — Priority: Env Var > Local File > Hardcoded Fallback
-        self.hub_address = os.getenv("STRATEGY_HUB_ADDRESS")
+        # Resolve StrategyHub Address — Priority: Local File (if local) > Env Var > Hardcoded Fallback
+        self.hub_address: Optional[str] = None
         
-        if not self.hub_address and network == "local" and os.path.exists("contracts/deployed_address.txt"):
+        if network == "local" and os.path.exists("contracts/deployed_address.txt"):
             with open("contracts/deployed_address.txt", "r") as f:
                 self.hub_address = f.read().strip()
                 logger.info(f"Loaded StrategyHub from file (Local Override): {self.hub_address}")
-        elif self.hub_address:
-            logger.info(f"Loaded StrategyHub from ENV: {self.hub_address}")
+        
+        if not self.hub_address:
+            self.hub_address = os.getenv("STRATEGY_HUB_ADDRESS")
+            if self.hub_address:
+                logger.info(f"Loaded StrategyHub from ENV: {self.hub_address}")
         
         if not self.hub_address:
              # Final fallback to a well-known address if absolutely nothing found
